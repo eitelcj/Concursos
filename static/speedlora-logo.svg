@@ -1,0 +1,48 @@
+<svg width="1200" height="300" viewBox="0 0 1200 300" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g1" x1="40" y1="40" x2="240" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#5EEBFF"/>
+      <stop offset="52%" stop-color="#2A8CFF"/>
+      <stop offset="100%" stop-color="#9D5CFF"/>
+    </linearGradient>
+    <linearGradient id="g2" x1="385" y1="96" x2="830" y2="212" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="60%" stop-color="#BFD8FF"/>
+      <stop offset="100%" stop-color="#93A6FF"/>
+    </linearGradient>
+    <linearGradient id="g3" x1="735" y1="96" x2="1150" y2="212" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#5EEBFF"/>
+      <stop offset="40%" stop-color="#2A8CFF"/>
+      <stop offset="100%" stop-color="#9D5CFF"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="1 0 0 0 0  0 1 0 0 0.7  0 0 1 0 1  0 0 0 0.55 0" result="glowColor"/>
+      <feMerge>
+        <feMergeNode in="glowColor"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+
+  <!-- Symbol -->
+  <g transform="translate(42 40)">
+    <circle cx="120" cy="120" r="88" stroke="url(#g1)" stroke-width="12" opacity="0.22"/>
+    <path d="M51 91C64 57 98 38 132 42C165 45 188 63 194 85C199 103 191 122 171 133C155 142 137 144 121 148C98 153 88 166 91 182C95 201 119 213 148 211C177 209 202 196 219 175" stroke="url(#g1)" stroke-width="16" stroke-linecap="round" filter="url(#glow)"/>
+    <path d="M204 61C186 42 161 30 133 28C94 26 58 45 37 77" stroke="url(#g1)" stroke-width="10" stroke-linecap="round" opacity="0.95"/>
+    <path d="M40 166C49 197 73 223 107 233C149 244 194 229 221 196" stroke="url(#g1)" stroke-width="10" stroke-linecap="round" opacity="0.9"/>
+    <circle cx="34" cy="78" r="8" fill="#5EEBFF"/>
+    <circle cx="223" cy="195" r="8" fill="#9D5CFF"/>
+    <circle cx="203" cy="61" r="7" fill="#2A8CFF"/>
+    <path d="M121 88L128.5 108.5L149 116L128.5 123.5L121 144L113.5 123.5L93 116L113.5 108.5L121 88Z" fill="#F7FBFF" filter="url(#glow)"/>
+    <path d="M8 116H30" stroke="#39C6FF" stroke-width="6" stroke-linecap="round" opacity="0.9"/>
+    <path d="M0 136H24" stroke="#39C6FF" stroke-width="6" stroke-linecap="round" opacity="0.72"/>
+    <path d="M6 156H20" stroke="#39C6FF" stroke-width="6" stroke-linecap="round" opacity="0.5"/>
+  </g>
+
+  <!-- Wordmark: one continuous SpeedLora name; color changes without a visual space. -->
+  <g transform="translate(330 0)">
+    <text x="0" y="155" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="98" font-weight="700" letter-spacing="-3"><tspan fill="url(#g2)">Speed</tspan><tspan fill="url(#g3)">Lora</tspan></text>
+  </g>
+</svg>

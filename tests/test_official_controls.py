@@ -1,0 +1,42 @@
+"""Regressions for fail-closed source handling and IBAM shared catalog URL."""
+import hashlib
+from app import collectors, core, evidence
+
+
+def test_retifications_never_chosen_as_initial_notice():
+    assert not collectors.notice_anchor('Retificação do Edital', 'https://www.ibam-concursos.org.br/retificacao-edital.pdf')
+    assert not collectors.notice_anchor('Suspensão do Edital 01', 'https://www.gov.br/suspensao.pdf')
+    assert collectors.notice_anchor('Edital de Abertura', 'https://www.gov.br/edital.pdf')
+
+
+def test_two_ibam_edital_documents_are_separate(monkeypatch):
+    html='''<html><main>
+      <h4>Prefeitura A — Concurso Público</h4>
+      <p>Vaga de Analista de Sistemas</p><a href="/documento-A.pdf">Edital de Abertura</a>
+      <h4>Prefeitura B — Concurso Público</h4>
+      <p>Vaga de Tecnologia da Informação</p><a href="/documento-B.pdf">Edital de Abertura</a>
+    </main></html>'''
+    def fetch(url,session=None):
+        return url,html.encode(),'text/html'
+    def proof(url,session=None,position=''):
+        return evidence.Proof(url,hashlib.sha256(url.encode()).hexdigest(),
+                              'EDITAL DE ABERTURA CONCURSO PÚBLICO ANALISTA DE SISTEMAS',
+                              'pdf','analista de sistemas')
+    monkeypatch.setattr(evidence,'fetch_official',fetch)
+    monkeypatch.setattr(evidence,'notice_proof',proof)
+    s=collectors.Source('IBAM — editais','https://www.ibam-concursos.org.br/','notice_index')
+    found,added,ok=collectors.scan_source(s)
+    assert (found,added,ok)==(2,2,True)
+    items=core.query_opportunities()
+    assert len(items)==2
+    assert len({i['fingerprint'] for i in items})==2
+    assert all(i['status']=='verify' and not i['document_verified'] for i in items)
+
+
+def test_list_without_readable_opening_notice_is_not_ok(monkeypatch):
+    html='''<html><a href="/CMIH2601">Detalhes</a></html>'''
+    monkeypatch.setattr(evidence,'fetch_official',lambda url,session=None:(url,html.encode(),'text/html'))
+    s=collectors.Source('Vunesp — próximos','https://www.vunesp.com.br/busca/concurso/proximo')
+    found,added,ok=collectors.scan_source(s)
+    assert not ok and found==0 and added==0
+    assert 'PARCIAL' in core.source_health()[0]['error']
