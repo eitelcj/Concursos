@@ -4,16 +4,17 @@ Conservative: a notice must be fetched and contain an IT role before surfacing.
 
 import hashlib
 import logging
-import os
 import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from datetime import date, datetime
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
-from . import core, evidence, polite
+from . import clock, config, database, evidence, polite, textnorm
+from . import repository as repo
 
 LOG = logging.getLogger(__name__)
 LOCK = threading.Lock()
@@ -38,7 +39,6 @@ SOURCES = (
     Source('Prefeitura de Campinas', 'https://campinas.sp.gov.br/', 'watch'),
     Source('Diário Oficial do Estado SP', 'https://doe.sp.gov.br/', 'watch'),
 )
-DETAIL_LIMIT = int(os.getenv('RADAR_DETAIL_LIMIT', '50'))
 
 
 def hrefs(html, base):
@@ -65,13 +65,13 @@ def looks_detail(source, text, url):
     if 'ABCP' in name:
         return 'concurso' in p or 'edital' in p or 'detalhe' in p
     if 'Carlos Chagas' in name:
-        return bool(re.search('concurso|sele[cç]|inscri', p + ' ' + evidence.fold(text)))
+        return bool(re.search('concurso|sele[cç]|inscri', p + ' ' + textnorm.fold(text)))
     return False
 
 
 def notice_anchor(text, url):
-    q = evidence.fold(text)
-    path = evidence.fold(urlparse(url).path)
+    q = textnorm.fold(text)
+    path = textnorm.fold(urlparse(url).path)
     # Do not treat random communiqués, results, summons or news as opening notice.
     if any(
         w in q or w in path
@@ -97,7 +97,7 @@ def notice_anchor(text, url):
 
 
 def scan_source(source, session=None):
-    sid = core.scan_start(source.name)
+    sid = repo.scan_start(source.name)
     detected = registered = 0
     try:
         base, raw, _mime = evidence.fetch_official(source.url, session)
@@ -106,7 +106,7 @@ def scan_source(source, session=None):
             raise ValueError('Fonte oficial vazia')
         if source.mode == 'watch':
             watch_page(source.name, base, html)
-            core.scan_finish(sid, 1, 0)
+            repo.scan_finish(sid, 1, 0)
             return (1, 0, True)
         seeds = [(source.name, base, html)] if source.mode == 'details' else []
         if source.mode == 'notice_index':
@@ -126,8 +126,8 @@ def scan_source(source, session=None):
                         break
                 fragment = ''.join(fragments)
                 if fragment and (
-                    core.is_it(BeautifulSoup(fragment, 'html.parser').get_text(' ', strip=True))
-                    or 'diversos cargos' in core.ascii_fold(fragment)
+                    textnorm.is_it(BeautifulSoup(fragment, 'html.parser').get_text(' ', strip=True))
+                    or 'diversos cargos' in textnorm.fold(fragment)
                 ):
                     seeds.append((title, base, fragment))
             if not blocks:
@@ -140,10 +140,11 @@ def scan_source(source, session=None):
             )
             if not detail_links:
                 raise ValueError('Nenhum detalhe de concurso extraído: revisar HTML ou JS')
-            if len(detail_links) > DETAIL_LIMIT:
-                incomplete.append(f'{len(detail_links)} concursos, limite por rodada {DETAIL_LIMIT}')
-                detail_links = detail_links[:DETAIL_LIMIT]
-            if 'vunesp' in source.url and 'mostrar mais opcoes' in core.ascii_fold(html):
+            limit = config.detail_limit()
+            if len(detail_links) > limit:
+                incomplete.append(f'{len(detail_links)} concursos, limite por rodada {limit}')
+                detail_links = detail_links[:limit]
+            if 'vunesp' in source.url and 'mostrar mais opcoes' in textnorm.fold(html):
                 incomplete.append('Vunesp possui paginação dinâmica não percorrida')
             for title, url in detail_links:
                 try:
@@ -152,7 +153,7 @@ def scan_source(source, session=None):
                 except polite.DomainCoolingDown:
                     raise
                 except Exception as err:
-                    core.upsert_candidate(url, source.name, title or url, state='fetch_failed', detail=str(err))
+                    repo.upsert_candidate(url, source.name, title or url, state='fetch_failed', detail=str(err))
                     raise ValueError(f'Falha na página {url}: {err}') from err
         if source.mode == 'notice_index':
             # An IBAM listing carries multiple contests at the SAME URL. Aggregate
@@ -163,7 +164,7 @@ def scan_source(source, session=None):
                     (t, u)
                     for t, u in hrefs(fragment, base)
                     if any(
-                        w in core.ascii_fold(t)
+                        w in textnorm.fold(t)
                         for w in ('retificacao', 'suspensao', 'prorrogacao', 'cancelamento', 'alteracao do edital')
                     )
                 )
@@ -178,7 +179,7 @@ def scan_source(source, session=None):
                         (t, u)
                         for t, u in allanchors
                         if any(
-                            w in core.ascii_fold(t)
+                            w in textnorm.fold(t)
                             for w in ('retificacao', 'suspensao', 'prorrogacao', 'cancelamento', 'alteracao do edital')
                         )
                     ],
@@ -199,13 +200,13 @@ def scan_source(source, session=None):
                 except polite.DomainCoolingDown:
                     raise
                 except Exception as err:
-                    core.upsert_candidate(
+                    repo.upsert_candidate(
                         notice_url, source.name, title, notice_url, state='needs_review', detail=str(err)
                     )
                     continue
                 # We have a real readable official edital and an IT role. Still no dates or salary guessed.
                 detected += 1
-                core.upsert_candidate(
+                repo.upsert_candidate(
                     proof.url,
                     source.name,
                     title,
@@ -225,18 +226,18 @@ def scan_source(source, session=None):
                     'notes': 'Edital oficial de TI identificado. Confirme cargo, salários e datas no documento antes de classificar inscrições.',
                     'fingerprint': hashlib.sha256(('official-document|' + proof.url).encode()).hexdigest()[:32],
                 }
-                oid, created = core.upsert(item)
+                oid, created = repo.upsert(item)
                 if not created:
-                    with core.connection() as db:
+                    with database.connection() as db:
                         saved = db.execute(
                             'SELECT sha256 FROM notice_evidence WHERE opportunity_id=?', (oid,)
                         ).fetchone()
                     if saved and saved['sha256'] != proof.sha256:
-                        with core.DB_LOCK, core.connection() as db:
+                        with database.DB_LOCK, database.connection() as db:
                             db.execute('DELETE FROM notice_evidence WHERE opportunity_id=?', (oid,))
                             db.execute("UPDATE opportunities SET reviewed=0,confidence='discovery' WHERE id=?", (oid,))
                             db.commit()
-                        core.add_alert(
+                        repo.add_alert(
                             'notice-changed:' + str(oid) + ':' + proof.sha256,
                             'site_changed',
                             f'Edital alterado para {title}; aprovação anterior revogada. Conferir documentos: {proof.url}',
@@ -244,7 +245,7 @@ def scan_source(source, session=None):
                         )
                 if created:
                     registered += 1
-                    core.add_alert(
+                    repo.add_alert(
                         'new-official:' + str(oid),
                         'new',
                         f'Edital oficial com TI encontrado: {title}. Conferência do cargo pendente. {proof.url}',
@@ -254,17 +255,17 @@ def scan_source(source, session=None):
             incomplete.append('Nenhum edital de abertura acessível; cobertura documental não comprovada')
         if incomplete:
             msg = '; '.join(dict.fromkeys(incomplete))
-            core.scan_finish(sid, detected, registered, error='Cobertura PARCIAL: ' + msg)
+            repo.scan_finish(sid, detected, registered, error='Cobertura PARCIAL: ' + msg)
             return detected, registered, False
-        core.scan_finish(sid, detected, registered)
+        repo.scan_finish(sid, detected, registered)
         return detected, registered, True
     except polite.DomainCoolingDown as ex:
         LOG.warning('Domínio oficial em pausa %s: %s', source.name, ex)
-        core.scan_finish(sid, detected, registered, error=str(ex), state='blocked')
+        repo.scan_finish(sid, detected, registered, error=str(ex), state='blocked')
         return detected, registered, False
     except Exception as ex:
         LOG.warning('Fonte oficial %s: %s', source.name, ex)
-        core.scan_finish(sid, detected, registered, error=str(ex))
+        repo.scan_finish(sid, detected, registered, error=str(ex))
         return detected, registered, False
 
 
@@ -273,7 +274,7 @@ def monitor_changes(page, changes):
     import json
 
     links = json.dumps(sorted({url for _, url in changes}), ensure_ascii=False)
-    with core.DB_LOCK, core.connection() as db:
+    with database.DB_LOCK, database.connection() as db:
         old = db.execute('SELECT document_links FROM notice_watches WHERE page_url=?', (page,)).fetchone()
         previous = set(json.loads(old[0])) if old else set()
         current = set(json.loads(links))
@@ -281,7 +282,7 @@ def monitor_changes(page, changes):
         db.execute(
             """INSERT INTO notice_watches(page_url,document_links,checked_at) VALUES(?,?,?)
              ON CONFLICT(page_url) DO UPDATE SET document_links=excluded.document_links,checked_at=excluded.checked_at""",
-            (page, links, core.now()),
+            (page, links, clock.now()),
         )
         if fresh:
             records = db.execute(
@@ -294,7 +295,7 @@ def monitor_changes(page, changes):
                 db.execute("UPDATE opportunities SET reviewed=0,confidence='discovery' WHERE id=?", (rec['id'],))
         db.commit()
     if fresh:
-        core.add_alert(
+        repo.add_alert(
             'retification:' + hashlib.sha256((page + links).encode()).hexdigest(),
             'site_changed',
             f'Novo documento de retificação/suspensão encontrado em {page}. Conferir edital.',
@@ -310,18 +311,18 @@ def watch_page(label, url, html):
     if len(normalized) < 50:
         raise ValueError('Página sem conteúdo verificável')
     digest = hashlib.sha256(normalized.encode()).hexdigest()
-    with core.DB_LOCK, core.connection() as db:
+    with database.DB_LOCK, database.connection() as db:
         old = db.execute('SELECT digest FROM watched_pages WHERE url=?', (url,)).fetchone()
         changed = bool(old and old['digest'] and old['digest'] != digest)
         db.execute(
             """INSERT INTO watched_pages(url,label,digest,checked_at,changed_at,error)
           VALUES(?,?,?,?,?,?) ON CONFLICT(url) DO UPDATE SET digest=excluded.digest,checked_at=excluded.checked_at,
           changed_at=CASE WHEN watched_pages.digest<>excluded.digest THEN excluded.changed_at ELSE watched_pages.changed_at END,error='' """,
-            (url, label, digest, core.now(), core.now() if changed else None, ''),
+            (url, label, digest, clock.now(), clock.now() if changed else None, ''),
         )
         db.commit()
     if changed:
-        core.add_alert(
+        repo.add_alert(
             'changed:' + url + ':' + digest,
             'site_changed',
             f'Página oficial alterada: {label}. Verificar edital/retificação: {url}',
@@ -329,13 +330,13 @@ def watch_page(label, url, html):
 
 
 def deadline_alerts(reference=None):
-    reference = reference or core.today()
-    for item in core.query_opportunities():
+    reference = reference or clock.today()
+    for item in repo.query_opportunities():
         if item['status'] != 'open' or item['dismissed'] or not item['registration_end']:
             continue
-        days = (core.date.fromisoformat(item['registration_end']) - reference).days
+        days = (date.fromisoformat(item['registration_end']) - reference).days
         if days in (7, 3, 1, 0):
-            core.add_alert(
+            repo.add_alert(
                 f'deadline:{item["id"]}:{item["registration_end"]}:{days}',
                 'deadline',
                 f'Prazo: {days} dia(s) — {item["title"]}. Inscrição em {item["apply_url"] or item["official_url"]}',
@@ -347,13 +348,13 @@ def claim_lease():
     # SQLite serialized across API and worker, with expiration in case process dies.
     from datetime import timedelta
 
-    with core.DB_LOCK, core.connection() as db:
+    with database.DB_LOCK, database.connection() as db:
         db.execute('BEGIN IMMEDIATE')
         row = db.execute("SELECT value FROM app_settings WHERE key='scan_lease_until'").fetchone()
-        if row and row[0] > core.now():
+        if row and row[0] > clock.now():
             db.rollback()
             return False
-        until = (core.datetime.now(core.TZ) + timedelta(minutes=75)).isoformat(timespec='seconds')
+        until = (datetime.now(clock.TZ) + timedelta(minutes=75)).isoformat(timespec='seconds')
         db.execute(
             "INSERT INTO app_settings(key,value) VALUES ('scan_lease_until',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (until,),
@@ -363,7 +364,7 @@ def claim_lease():
 
 
 def release_lease():
-    with core.DB_LOCK, core.connection() as db:
+    with database.DB_LOCK, database.connection() as db:
         db.execute("DELETE FROM app_settings WHERE key='scan_lease_until'")
         db.commit()
 
@@ -379,9 +380,7 @@ def run_all(session=None):
         # Queue different official domains in parallel; no concurrent burst
         # against a single host (polite.request_lane serializes per domain).
         # Fake injected sessions are intentionally sequential for test safety.
-        workers = (
-            1 if session is not None else min(len(SOURCES), max(1, min(5, int(os.getenv('RADAR_SOURCE_WORKERS', '3')))))
-        )
+        workers = 1 if session is not None else min(len(SOURCES), config.source_workers())
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix='official-source') as executor:
             tasks = {executor.submit(scan_source, source, session): source for source in SOURCES}
             for future in as_completed(tasks):
@@ -391,8 +390,8 @@ def run_all(session=None):
                 except Exception as ex:
                     LOG.exception('Erro inesperado no job %s', source.name)
                     f, a, ok = 0, 0, False
-                    core.add_alert(
-                        'collector-exception:' + source.name + ':' + core.now()[:13],
+                    repo.add_alert(
+                        'collector-exception:' + source.name + ':' + clock.now()[:13],
                         'coverage',
                         f'Job oficial {source.name} falhou: {ex}',
                     )
@@ -400,8 +399,8 @@ def run_all(session=None):
                 added += a
                 failed += int(not ok)
         if failed:
-            core.add_alert(
-                'source-fail:' + core.now()[:13],
+            repo.add_alert(
+                'source-fail:' + clock.now()[:13],
                 'coverage',
                 f'{failed}/{len(SOURCES)} fontes oficiais falharam. Cobertura incompleta; veja Fontes.',
             )

@@ -1,6 +1,7 @@
 from datetime import datetime
 
-from app import collectors, core, evidence
+from app import collectors, evidence
+from app import repository as repo
 from app.worker import slot
 
 
@@ -49,7 +50,7 @@ def test_source_failure_clearly_reported(monkeypatch):
     monkeypatch.setattr(evidence, 'fetch_official', bad)
     f, a, ok = collectors.scan_source(collectors.SOURCES[0])
     assert (f, a, ok) == (0, 0, False)
-    assert core.source_health()[0]['state'] == 'failed'
+    assert repo.source_health()[0]['state'] == 'failed'
 
 
 def test_watched_page_change():
@@ -59,11 +60,11 @@ def test_watched_page_change():
     collectors.watch_page(
         'Orgão', 'https://www.gov.br/orgao', '<html><main>' + 'texto modificado ' * 30 + '</main></html>'
     )
-    assert any(a['kind'] == 'site_changed' for a in core.get_alerts())
+    assert any(a['kind'] == 'site_changed' for a in repo.get_alerts())
 
 
 def test_deadline_only_proven():
-    core.upsert(
+    repo.upsert(
         {
             'title': 'Incompleto',
             'position': 'Analista de Sistemas',
@@ -74,5 +75,5 @@ def test_deadline_only_proven():
             'reviewed': 1,
         }
     )
-    collectors.deadline_alerts(reference=core.date(2026, 10, 16))
-    assert not any(x['kind'] == 'deadline' for x in core.get_alerts())
+    collectors.deadline_alerts(reference=repo.date(2026, 10, 16))
+    assert not any(x['kind'] == 'deadline' for x in repo.get_alerts())

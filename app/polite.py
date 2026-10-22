@@ -8,7 +8,6 @@ are never defeated by identity rotation, headless-browser tricks or proxies.
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import time
 from contextlib import contextmanager
@@ -16,7 +15,7 @@ from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
 
-from . import core
+from . import clock, config, database
 
 LOG = logging.getLogger(__name__)
 _LOCKS: dict[str, threading.Lock] = {}
@@ -28,7 +27,7 @@ class DomainCoolingDown(RuntimeError):
         self.host = host
         self.status = status
         self.until = until
-        stamp = datetime.fromtimestamp(until, core.TZ).strftime('%d/%m/%Y %H:%M')
+        stamp = datetime.fromtimestamp(until, clock.TZ).strftime('%d/%m/%Y %H:%M')
         super().__init__(
             f'HTTP {status}: acesso oficial recusado/limitado por {host}; suspenso até {stamp} (São Paulo). Sem contornar bloqueio.'
         )
@@ -47,15 +46,12 @@ def host_lock(host: str) -> threading.Lock:
 
 def interval_seconds() -> float:
     # One official domain never receives bursts, even if several jobs are queued.
-    try:
-        return max(3.0, min(60.0, float(os.getenv('RADAR_DOMAIN_INTERVAL_SECONDS', '8'))))
-    except ValueError:
-        return 8.0
+    return config.domain_interval_seconds()
 
 
 def reserve(host: str, now: float | None = None) -> float:
     now = time.time() if now is None else now
-    with core.DB_LOCK, core.connection() as db:
+    with database.DB_LOCK, database.connection() as db:
         db.execute('BEGIN IMMEDIATE')
         current = db.execute(
             'SELECT next_at,blocked_until,last_status FROM host_pacing WHERE host=?', (host,)
@@ -69,7 +65,7 @@ def reserve(host: str, now: float | None = None) -> float:
             """INSERT INTO host_pacing(host,next_at,blocked_until,last_status,updated_at)
           VALUES (?,?,?,?,?) ON CONFLICT(host) DO UPDATE SET
           next_at=excluded.next_at,updated_at=excluded.updated_at""",
-            (host, start + interval_seconds(), 0.0, 0, core.now()),
+            (host, start + interval_seconds(), 0.0, 0, clock.now()),
         )
         db.commit()
     return max(0.0, start - now)
@@ -98,23 +94,23 @@ def reject(host: str, status: int, retry_after: str | None = None, now: float | 
     # otherwise wait three hours. Cap locally at 7 days to avoid overflow.
     cooldown = 12 * 3600 if status == 403 else (retry if retry is not None else 3 * 3600)
     until = now + max(60.0, min(7 * 86400.0, cooldown))
-    with core.DB_LOCK, core.connection() as db:
+    with database.DB_LOCK, database.connection() as db:
         db.execute(
             """INSERT INTO host_pacing(host,next_at,blocked_until,last_status,updated_at)
           VALUES (?,?,?,?,?) ON CONFLICT(host) DO UPDATE SET
           blocked_until=MAX(host_pacing.blocked_until,excluded.blocked_until),
           last_status=excluded.last_status,updated_at=excluded.updated_at""",
-            (host, until, until, status, core.now()),
+            (host, until, until, status, clock.now()),
         )
         db.commit()
     LOG.warning(
-        'Official domain %s returned %d, suspended until %s', host, status, datetime.fromtimestamp(until, core.TZ)
+        'Official domain %s returned %d, suspended until %s', host, status, datetime.fromtimestamp(until, clock.TZ)
     )
     return DomainCoolingDown(host, status, until)
 
 
 def snapshot() -> dict[str, dict]:
-    with core.connection() as db:
+    with database.connection() as db:
         try:
             rows = db.execute('SELECT host,next_at,blocked_until,last_status FROM host_pacing').fetchall()
         except Exception:
@@ -123,7 +119,7 @@ def snapshot() -> dict[str, dict]:
     return {
         r['host']: {
             'blocked': r['blocked_until'] > now,
-            'until': datetime.fromtimestamp(r['blocked_until'], core.TZ).isoformat(timespec='minutes')
+            'until': datetime.fromtimestamp(r['blocked_until'], clock.TZ).isoformat(timespec='minutes')
             if r['blocked_until'] > now
             else None,
             'status': r['last_status'],
