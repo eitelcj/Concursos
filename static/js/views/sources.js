@@ -4,6 +4,10 @@ import { icon } from '../icons.js';
 import { state } from '../state.js';
 
 let root;
+const MODE_LABELS = {
+  watch: 'Monitor de alterações da página',
+  gazette_search: 'Busca nos diários oficiais municipais',
+};
 
 export function mount(container) {
   root = container;
@@ -29,24 +33,26 @@ function sourceRow(source, health) {
     </article>`;
   }
   const [label, tone] = sourceState(source, log);
-  const mode = source.mode === 'watch' ? 'Monitor de alterações da página' : 'Busca de editais';
+  const mode = MODE_LABELS[source.mode] || 'Busca de editais';
   let detail = 'Ainda não consultada.';
   if (source.pacing?.blocked) {
     detail = `O site recusou o acesso automático (HTTP ${esc(source.pacing.status)}). Nova tentativa após ${esc(dateTime(source.pacing.until))}.`;
   } else if (log?.error) {
     detail = esc(log.error);
   } else if (log) {
-    detail = `Editais examinados: ${log.found} · novos: ${log.added}`;
+    detail = source.mode === 'gazette_search'
+      ? `Diários com concurso de TI: ${log.found} · novos: ${log.added}`
+      : `Editais examinados: ${log.found} · novos: ${log.added}`;
   }
   return `<article class="row">
     <div class="row-head"><strong>${esc(source.name)}</strong><span class="badge badge-${tone}">${label}</span></div>
     <p>${detail}</p>
-    <p class="meta">${esc([source.agency, source.uf].filter(Boolean).join(' · '))}${source.agency || source.uf ? ' · ' : ''}${mode}${log ? ` · última consulta ${esc(dateTime(log.finished_at || log.started_at))}` : ''} · <a href="${safeUrl(source.url)}" target="_blank" rel="noopener noreferrer">Abrir fonte oficial ↗</a></p>
+    <p class="meta">${esc([source.agency, source.uf].filter(Boolean).join(' · '))}${source.agency || source.uf ? ' · ' : ''}${mode}${log ? ` · última consulta ${esc(dateTime(log.finished_at || log.started_at))}` : ''} · <a href="${safeUrl(source.mode === 'gazette_search' ? 'https://queridodiario.ok.org.br/' : source.url)}" target="_blank" rel="noopener noreferrer">${source.mode === 'gazette_search' ? 'Abrir Querido Diário ↗' : 'Abrir fonte oficial ↗'}</a></p>
   </article>`;
 }
 
 function candidateRow(candidate) {
-  const tone = candidate.state === 'edital_ti' ? 'open' : candidate.state === 'fetch_failed' ? 'danger' : 'verify';
+  const tone = candidate.state === 'edital_ti' ? 'open' : candidate.state === 'gazette_ti' ? 'upcoming' : candidate.state === 'fetch_failed' ? 'danger' : 'verify';
   return `<article class="row">
     <div class="row-head"><strong>${esc(candidate.title)}</strong><span class="badge badge-${tone}">${esc(CANDIDATE_LABELS[candidate.state] || candidate.state)}</span></div>
     <p>${esc(candidate.detail)}</p>

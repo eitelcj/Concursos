@@ -31,7 +31,7 @@ def clean_robots_cache():
 
 def test_repository_sources_file_is_valid():
     loaded = sources.load(ROOT / 'sources.yaml')
-    assert len(loaded) == 10
+    assert len(loaded) == 11
     assert all(s.url.startswith('https://') for s in loaded)
     assert any(s.mode == 'watch' and s.uf == 'SP' for s in loaded)
 
