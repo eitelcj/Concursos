@@ -192,6 +192,26 @@ def scan_finish(run_id, found=0, added=0, error='', state=None):
         db.commit()
 
 
+def prune_candidates(days=30):
+    """Drop triage rows that are obsolete: viewer-wrapped FCC links, documents already known
+    not to be opening IT editais, robots-skipped service pages and anything unseen for a month."""
+    from datetime import datetime, timedelta
+
+    cutoff = (datetime.now(clock.TZ) - timedelta(days=days)).isoformat(timespec='seconds')
+    with database.DB_LOCK, database.connection() as db:
+        cur = db.execute(
+            """DELETE FROM scan_candidates WHERE url LIKE '%/rybena/%'
+               OR (state='needs_review' AND (detail LIKE 'O arquivo não demonstra ser edital%'
+                   OR detail LIKE 'Não foi comprovado que o documento seja o edital inicial%'
+                   OR detail LIKE 'Edital sem cargo de TI%'))
+               OR (state='fetch_failed' AND detail LIKE 'robots.txt %')
+               OR last_seen < ?""",
+            (cutoff,),
+        )
+        db.commit()
+        return cur.rowcount
+
+
 def close_interrupted_runs():
     """A restart can cut a collection in half; do not leave those sources showing 'running' forever."""
     with database.DB_LOCK, database.connection() as db:

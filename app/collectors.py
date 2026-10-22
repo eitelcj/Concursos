@@ -12,7 +12,7 @@ from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
-from . import clock, config, database, evidence, polite, sources, textnorm
+from . import clock, config, database, evidence, polite, robots, sources, textnorm
 from . import repository as repo
 
 LOG = logging.getLogger(__name__)
@@ -47,8 +47,36 @@ def looks_detail(source, text, url):
     if 'ABCP' in name:
         return 'concurso' in p or 'edital' in p or 'detalhe' in p
     if 'Carlos Chagas' in name:
-        return bool(re.search('concurso|sele[cç]|inscri', p + ' ' + textnorm.fold(text)))
+        # Contest pages look like /concursos/trt8r126/ ; /concursos/jsp/... are services (exam place etc.).
+        return bool(re.fullmatch(r'/concursos/[a-z][a-z0-9]{2,12}\d{3}/(index\.html?)?', p))
     return False
+
+
+DEFINITIVE = (
+    'O arquivo não demonstra ser edital',
+    'Não foi comprovado que o documento seja o edital inicial',
+    'Edital sem cargo de TI',
+    'Página HTML não identifica documento edital',
+    'Cargo/especialidade específicos não encontrados',
+)
+
+
+def is_definitive(reason):
+    """The document was read and is not an opening IT edital (as opposed to unreadable or blocked)."""
+    return reason.startswith(DEFINITIVE)
+
+
+def empty_listing_reason(html):
+    soup = BeautifulSoup(html, 'html.parser')
+    for tag in soup(['script', 'style', 'noscript']):
+        tag.decompose()
+    markers = ('id="root"', 'id="app"', '__next_data__', 'ng-version', 'data-reactroot', 'nuxt')
+    if len(soup.get_text(' ', strip=True)) < 400 or any(m in html.lower() for m in markers):
+        return (
+            'Site carregado por JavaScript: a lista de concursos não vem no HTML e o radar não executa scripts. '
+            'Concursos dessa banca aparecem pela busca nos diários oficiais.'
+        )
+    return 'Nenhum detalhe de concurso extraído: o formato da página mudou'
 
 
 def notice_anchor(text, url):
@@ -70,6 +98,15 @@ def notice_anchor(text, url):
             'errata',
             'cancelamento',
             'aditamento',
+            'comunicado',
+            'retifica',
+            'resultado',
+            'orientac',
+            'formulario',
+            'convoca',
+            'homolog',
+            'local de prova',
+            'localdeexame',
         )
     ):
         return False
@@ -126,22 +163,31 @@ def scan_source(source, session=None):
                 {url: (txt, url) for txt, url in hrefs(html, base) if looks_detail(source, txt, url)}.values()
             )
             if not detail_links:
-                raise ValueError('Nenhum detalhe de concurso extraído: revisar HTML ou JS')
+                raise ValueError(empty_listing_reason(html))
             limit = config.detail_limit()
             if len(detail_links) > limit:
                 incomplete.append(f'{len(detail_links)} concursos, limite por rodada {limit}')
                 detail_links = detail_links[:limit]
             if 'vunesp' in source.url and 'mostrar mais opcoes' in textnorm.fold(html):
                 incomplete.append('Vunesp possui paginação dinâmica não percorrida')
+            page_errors = robots_skipped = 0
             for title, url in detail_links:
                 try:
                     _, htmlbytes, _ = evidence.fetch_official(url, session)
                     seeds.append((title or url, url, evidence.decode_html(htmlbytes)))
                 except polite.DomainCoolingDown:
                     raise
+                except robots.RobotsBlocked:
+                    # A page the site asks robots not to open is skipped, not a source failure.
+                    robots_skipped += 1
                 except Exception as err:
+                    # One broken contest page must not hide all the others.
+                    page_errors += 1
                     repo.upsert_candidate(url, source.name, title or url, state='fetch_failed', detail=str(err))
-                    raise ValueError(f'Falha na página {url}: {err}') from err
+            if page_errors:
+                incomplete.append(f'{page_errors} página(s) de concurso não abriram; veja a triagem')
+            if robots_skipped and not seeds:
+                incomplete.append('robots.txt do site não permite abrir as páginas dos concursos')
         if source.mode == 'notice_index':
             # An IBAM listing carries multiple contests at the SAME URL. Aggregate
             # all change links once: never overwrite the watch per individual block.
@@ -156,6 +202,7 @@ def scan_source(source, session=None):
                     )
                 )
             monitor_changes(base, related)
+        examined = unreadable = 0
         for title, page, html in seeds:
             allanchors = list(hrefs(html, page))
             notice_links = [(t, u) for t, u in allanchors if notice_anchor(t, u)]
@@ -175,6 +222,10 @@ def scan_source(source, session=None):
                 # No edital => no promoted opportunity and no claim of validity.
                 if 'Vunesp' in source.name and 'Editais e Documentos' in html:
                     incomplete.append('Vunesp: seção documental depende de carregamento dinâmico')
+                elif source.mode == 'details' and empty_listing_reason(html).startswith(
+                    'Site carregado por JavaScript'
+                ):
+                    incomplete.append('A lista de documentos desta página é carregada por JavaScript')
                 continue
             # Scan multiple opening editais per contest: the first document is not
             # necessarily the IT one. Limit and expose partial coverage explicitly.
@@ -187,6 +238,11 @@ def scan_source(source, session=None):
                 except polite.DomainCoolingDown:
                     raise
                 except Exception as err:
+                    if is_definitive(str(err)):
+                        # Read it: it is simply not an opening IT edital. Not a coverage gap, not triage noise.
+                        examined += 1
+                        continue
+                    unreadable += 1
                     repo.upsert_candidate(
                         notice_url, source.name, title, notice_url, state='needs_review', detail=str(err)
                     )
@@ -238,7 +294,12 @@ def scan_source(source, session=None):
                         f'Edital oficial com TI encontrado: {title}. Conferência do cargo pendente. {proof.url}',
                         oid,
                     )
-        if not detected and source.mode in ('catalog', 'details', 'notice_index'):
+        if unreadable:
+            incomplete.append(
+                f'{unreadable} documento(s) sem leitura automática (PDF digitalizado ou bloqueado); veja a triagem'
+            )
+        nothing_listed = source.mode == 'notice_index' and not seeds
+        if not detected and not examined and not unreadable and not nothing_listed:
             incomplete.append('Nenhum edital de abertura acessível; cobertura documental não comprovada')
         if incomplete:
             msg = '; '.join(dict.fromkeys(incomplete))

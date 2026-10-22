@@ -38,6 +38,7 @@ def tick():
 def main():
     database.init_db()
     repo.close_interrupted_runs()
+    repo.prune_candidates()
     LOG.info('Worker started: official only, every 3h America/Sao_Paulo')
     try:
         validated, failed = verification.auto_verify()
