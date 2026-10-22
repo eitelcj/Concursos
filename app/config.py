@@ -4,6 +4,7 @@ Values are read on every call so tests and `docker compose up` restarts pick up 
 """
 
 import os
+import re
 
 
 def _int(name, default, low=None, high=None):
@@ -41,6 +42,17 @@ def admin_password():
 def public_mode():
     """RADAR_PUBLIC=1 (default): anyone can browse the list; 0: everything requires the admin login."""
     return os.getenv('RADAR_PUBLIC', '1') != '0'
+
+
+def app_name():
+    """Name shown in the interface, page titles and notifications (RADAR_APP_NAME)."""
+    return os.getenv('RADAR_APP_NAME', '').strip()[:60] or 'SpeedLora Radar'
+
+
+def default_uf():
+    """Two-letter state (UF) preselected in the public list; empty = all of Brazil (RADAR_DEFAULT_UF)."""
+    value = os.getenv('RADAR_DEFAULT_UF', '').strip().upper()
+    return value if re.fullmatch(r'[A-Z]{2}', value) else ''
 
 
 def trusted_proxies():
