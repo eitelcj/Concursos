@@ -30,6 +30,11 @@ export function mount(container) {
           <div class="form-actions"><button class="btn btn-primary" type="submit">Trocar senha</button></div>
         </form>
       </section>
+      <section class="panel admin-only" id="alertsPanel">
+        <h3>Avisos por e-mail ou Telegram</h3>
+        <p class="muted">Envia uma mensagem de teste pelos canais configurados no .env (SMTP_* ou TELEGRAM_*). Não altera os alertas.</p>
+        <div class="form-actions"><button class="btn" type="button" id="testAlerts">Enviar aviso de teste</button></div>
+      </section>
       <section class="panel admin-only" id="devicesPanel">
         <h3>Dispositivos conectados</h3>
         <p class="muted">Sessões abertas neste radar. Encerre as que você não reconhece.</p>
@@ -79,6 +84,7 @@ export function mount(container) {
     if (button) theme.setPreference(button.dataset.themeChoice);
   });
   $('#passwordForm', root).addEventListener('submit', changePassword);
+  $('#testAlerts', root).addEventListener('click', testAlerts);
   $('#deviceList', root).addEventListener('click', onDeviceClick);
   $('#revokeOthers', root).addEventListener('click', revokeOthers);
   $('#revokeTrusted', root).addEventListener('click', revokeTrusted);
@@ -156,6 +162,19 @@ async function onDeviceClick(event) {
     loadSecurity();
   } catch (error) {
     toast(error.message);
+  }
+}
+
+async function testAlerts(event) {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const result = await post('/api/notifications/test');
+    toast(`Teste enviado por: ${result.channels.join(' e ')}.`);
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
   }
 }
 

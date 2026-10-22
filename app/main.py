@@ -22,6 +22,7 @@ from . import (
     database,
     evidence,
     kv,
+    notifications,
     polite,
     seeds,
     suggest,
@@ -447,6 +448,20 @@ def all_sources():
         return source_catalog.load()
     except source_catalog.SourceError:
         return collectors.SOURCES
+
+
+@app.post('/api/notifications/test')
+def notifications_test():
+    try:
+        result = notifications.send_test()
+    except Exception as e:  # network or SMTP errors: do not expose internals to the browser
+        LOG.warning('Teste de aviso falhou: %s', e)
+        raise HTTPException(
+            422, 'Não foi possível enviar o teste. Confira as variáveis SMTP_* ou TELEGRAM_* no .env.'
+        ) from e
+    if not result['channels']:
+        raise HTTPException(422, 'Nenhum canal configurado. Defina SMTP_* ou TELEGRAM_* no .env.')
+    return result
 
 
 @app.post('/api/scan', status_code=202)
