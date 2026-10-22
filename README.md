@@ -1,132 +1,138 @@
-# SpeedLora Concurso Radar v2.0.2 — editais oficiais de TI
+# SpeedLora Radar
 
-Monitor **privado** de concursos públicos de tecnologia, priorizando Campinas/Jundiaí/Itatiba/estado de São Paulo; também considera concursos federais cuja prova possa ser feita em SP mesmo que a lotação seja em outro estado. Salários **a partir de R$ 7 mil** recebem destaque **somente quando o valor do cargo estiver confirmado pelo edital**. Editais abaixo disso permanecem visíveis.
+> **Teste a versão completa em [radar.speedlora.app](https://radar.speedlora.app)**
 
-**Princípio do projeto:** não há Google Notícias, PCI Concursos, blogs nem agregadores na coleta. A lista de fontes contém exclusivamente sites de órgãos e bancas, e **fonte oficial acessível não significa edital validado**. Um concurso só recebe a indicação de confirmado se houver documento oficial de abertura legível, cargo específico e evidência por campo. A descoberta automática conservadora não confirma salários ou datas por inferência.
+Monitor de concursos públicos de TI (repositório `radar-public-sector`) a partir de **editais e páginas oficiais**. Um concurso só aparece como confirmado quando o edital oficial foi baixado, contém um cargo de TI e as datas e o salário estão no mesmo documento.
 
-**Estado de entrega:** projeto pronto para executar e testar localmente com FastAPI, SQLite, coleta a cada 3h, painel responsivo, senha única, MFA TOTP opcional e Compose. **A captura dos sites externos e o Docker ainda precisam de homologação real na máquina/VPS**, conforme `docs/REGRESSAO.md`. Não prometa zero concursos perdidos.
+Você pode usar do seu jeito: uma **instância pública** só de leitura para qualquer pessoa, ou uma **instância privada** com login, senha e MFA só para você.
 
-## 1. Iniciar localmente com Docker
+---
 
-Requer Docker Engine ou Docker Desktop com Compose.
+## Instalação com Docker
+
+Você precisa de Docker com Compose.
 
 ```bash
+git clone https://github.com/flemuh/radar-public-sector.git
+cd radar-public-sector
 cp .env.example .env
-# Troque RADAR_PASSWORD por uma senha longa e única (mínimo 7 caracteres).
-# PARA HTTP LOCAL (localhost) use RADAR_COOKIE_SECURE=0 no .env.
-# PARA VPS ATRÁS DE HTTPS use RADAR_COOKIE_SECURE=1.
+```
+
+Edite o `.env` e troque pelo menos:
+
+- `RADAR_PASSWORD`: senha do administrador, com no mínimo 7 caracteres (use uma senha longa e única).
+- `RADAR_COOKIE_SECURE`: deixe `0` para testar em `http://localhost`. Atrás de HTTPS, use `1`.
+
+Depois suba os serviços:
+
+```bash
 docker compose up -d --build
-docker compose ps
-docker compose logs -f --tail=100
 ```
 
-**Painel:** http://localhost:8765 — a entrada pede **apenas a senha**, sem nome de usuário. Se o login local não persistir, confira que `RADAR_COOKIE_SECURE=0` está definido para seu HTTP local. Nunca use `0` em produção HTTPS.
+Abra **http://127.0.0.1:8765**. A lista pública aparece; use **Entrar** para o painel de administração.
 
-Serviços: `concurso-radar` (API e UI, porta local `127.0.0.1:8765`), `radar-worker` (coleta) e volume persistente `concurso_radar_data` (SQLite). Evite `docker compose down -v` para não apagar o banco.
+Para parar sem perder dados: `docker compose down` (nunca use `-v`, que apaga o volume com o banco).
 
-**Inicialização:** quatro oportunidades iniciais da versão 1.1 (três especialidades CGU e IFSP) continuam preservadas. Por segurança, **não são automaticamente consideradas validadas na v2**: aparecerão como “a verificar” até uma validação de edital original. Todos os favoritos, inscrições marcadas e anotações persistem se for reutilizado o **mesmo volume da v1.1**.
-
-
-**Senha com 7 caracteres:** a validação do backend e o formulário aceitam no mínimo 7 caracteres (não exigem letras maiúsculas ou caracteres especiais). Por segurança, prefira uma senha maior, especialmente ao expor o sistema na VPS, e ative o MFA. Se a API estiver `unhealthy`, confira se `RADAR_PASSWORD` em `.env` não está com `SUBSTITUA-...` e reinicie o Compose (`docker compose up -d --build --force-recreate`); preserve `.env` e o volume.
-
-## 2. Segurança: senha + MFA opcional
-
-O login usa uma senha única, bloqueio por repetidas tentativas e sessão protegida por cookie `HttpOnly`, `SameSite=Strict` por até 7 dias. Não há criação de usuários. Após entrar, vá em **Configurações → MFA**.
-
-Para habilitar Google Authenticator ou outro app TOTP, gere uma chave Fernet exclusiva e configure **antes** de iniciar o serviço:
+### Testes
 
 ```bash
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+docker build --target test -t radar-tests .
+docker run --rm radar-tests
 ```
 
-Copie para `RADAR_MFA_ENCRYPTION_KEY` em `.env` e reinicie o Compose. No painel, informe a senha, escaneie o QR Code, confirme o código de seis dígitos e **salve os oito códigos de recuperação**. Para desativar MFA, é exigida senha + código válido. Guarde a chave Fernet junto dos backups; perdê-la impede a leitura da configuração de MFA atual. Nunca copie `.env` nem segredos do Life para o Radar.
+---
 
-**VPS:** passe pelo seu proxy reverso com HTTPS. A API não deve ser publicada diretamente na internet. Veja `docs/DEPLOY_VPS.md`.
+## Configuração principal (`.env`)
 
-## 3. Como a validação de um concurso funciona
+| Variável | Padrão | Para que serve |
+|---|---|---|
+| `RADAR_PASSWORD` | — | Senha do administrador. Obrigatória. |
+| `RADAR_PUBLIC` | `1` | `1`: qualquer pessoa vê a lista. `0`: tudo exige login. |
+| `RADAR_APP_NAME` | `SpeedLora Radar` | Nome no site e nos avisos. |
+| `RADAR_DEFAULT_UF` | vazio | Estado pré-selecionado na lista (ex.: `SP`). Vazio = Brasil. |
+| `RADAR_COOKIE_SECURE` | `1` | `0` só para HTTP local. |
+| `RADAR_MFA_ENCRYPTION_KEY` | vazio | Necessária para ativar MFA. Faça backup dela. |
+| `RADAR_TRUSTED_PROXIES` | vazio | IPs do seu proxy reverso, para registrar o IP real. |
+| `RADAR_RETRY_SECONDS` | `900` | Espera após falha de uma fonte. |
+| `RADAR_DOMAIN_INTERVAL_SECONDS` | `8` | Intervalo mínimo entre pedidos ao mesmo site (3 a 60). |
+| `SMTP_*`, `ALERT_EMAIL_*` | vazio | Avisos por e-mail (opcional). |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | vazio | Avisos por Telegram (opcional). |
 
-O Radar usa níveis distintos:
+As fontes oficiais ficam em **`sources.yaml`**. Cada entrada tem nome, URL oficial, modo e UF. Para desligar uma fonte sem apagá-la, use `enabled: false`. Ao iniciar, o arquivo é validado e erros aparecem com a linha exata.
 
-1. **Fonte consultada:** domínio oficial permitido respondeu, mas pode não ter havido edital detectado. A cobertura fica como parcial/falha se não houver documento acessível.
-2. **Edital inicial encontrado:** documento obtido diretamente de órgão/banca em HTTPS, identificado como edital de abertura e contendo termos de TI. Entra como oportunidade/candidato **sem confirmar cargo individual, remuneração nem prazo**.
-3. **Concurso confirmado:** no painel, edite o registro com o cargo específico e os campos do documento. Pressione **Validar edital**: o servidor busca novamente o documento, confirma a estrutura, o cargo, os prazos mencionados em contexto e, se fornecido, **salário junto ao cargo**, registra o SHA-256 e a data. Se a evidência faltar, mantém **A verificar** e informa o motivo.
-4. **Aberto/Em breve/Encerrado:** só é calculado sobre registro documentado. A situação aberta requer **datas de início e fim confirmadas**, não manchete, faixa salarial geral ou página de inscrição isolada. Um edital retificado ou alterado invalida a conferência anterior até nova revisão.
+---
 
-A confirmação documental automática é **conservadora, não substitui a leitura humana integral e não prova assinatura digital**. PDFs digitalizados/ilegíveis e editais cujo texto esteja em anexos separados podem exigir revisão manual; o sistema não lhes concede confirmação indevida. Consulte `docs/CRITERIOS_DE_VALIDACAO.md`.
+## Como funciona
 
-## 4. Varreduras e painel
+- **Coleta a cada 3 horas**, em horário de Brasília, com fila por domínio.
+- **Respeita o site:** lê `robots.txt` antes de cada página; se o site recusar (403) ou pedir espera (429), o domínio fica pausado pelo tempo indicado.
+- **Validação documental:** o edital é baixado, tem o hash SHA-256 registrado, e o cargo de TI, as datas e o salário precisam aparecer juntos no texto.
+- **Extração assistida:** no editor, o botão *Sugerir campos a partir do edital* propõe datas e salário com o trecho de origem. Nada é salvo sem você confirmar.
+- **Busca e filtros:** busca sem acento, filtro por estado e ordenação por prazo, salário, órgão ou data.
+- **Sua etapa:** no painel, marque se você tem interesse, se inscreveu, se a prova foi marcada ou se aguarda resultado. Essa informação é privada.
 
-Worker independente com agendamento no fuso `America/Sao_Paulo`: **00h, 03h, 06h, 09h, 12h, 15h, 18h, 21h**. Após reiniciar, ele executa se ainda não completou a janela atual. Falhas de fonte provocam **no máximo uma nova tentativa** após 15 minutos por janela de 3 horas (configurável), sem registrar falso sucesso nem bombardear portais indisponíveis. Trava SQLite impede varreduras concorrentes de worker e botão manual.
+**Limite:** a validação é conservadora e não substitui a leitura do edital. PDFs digitalizados ou com texto em anexos podem precisar de revisão manual.
 
-No painel: **Concursos** (status, filtro SP/nacional, R$7k+, busca, favoritos, inscritos), **Alertas** (editais novos, mudanças, prazos), **Fontes** (sucesso/falha, candidaturas a conferir, links oficiais), **Configurações** (MFA e tema). Temas: **SoftLight** e **SpeedLora**, inspirados nas definições do Life fornecido. A interface não exibe datas/cidades/salários como fatos se a validação não passou.
+---
 
-**Fontes oficiais configuradas:** Vunesp (abertos e próximos), FGV, FCC, IBAM, ABCP, Cebraspe (página específica CGU), IFSP (página específica), Prefeitura de Campinas e Diário Oficial do Estado de SP. As duas últimas são **vigias de alteração de páginas**, não extratores completos de editais. Alguns sites usam JavaScript/paginação e podem aparecer como **cobertura parcial**, nunca como monitoramento pleno fictício. Lista/limites em `docs/FONTES_E_COBERTURA.md`.
+## Segurança
 
-**Alertas externos:** Telegram ou SMTP opcionais por variáveis `.env.example`. Sem credenciais, os avisos ficam apenas no painel.
+- **Senha** com hash scrypt. Troque em *Configurações → Senha do administrador*.
+- **MFA opcional** (aplicativo autenticador, com códigos de recuperação).
+- **Dispositivos conectados:** veja e encerre sessões de outros navegadores. *Lembrar este dispositivo por 7 dias* dispensa o código MFA só naquele aparelho.
+- **Atividade recente:** tentativas de login, troca de senha e mudanças de MFA ficam registradas.
+- Em produção, publique apenas via HTTPS com proxy reverso. Não exponha a porta 8765 diretamente.
 
-## 5. Comandos e testes
+---
 
-Sem Docker (venv Python 3.12+):
+## Atualizar e fazer backup
+
+**Backup do banco** (SQLite, sem parar o serviço):
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements-dev.txt
-export RADAR_DB="$PWD/data/radar.sqlite3"
-export RADAR_PASSWORD="troque-por-uma-senha-longa-unica"
-export RADAR_COOKIE_SECURE=0
-python -m pytest -q
-python scripts/check_config.py
-uvicorn app.main:app --host 127.0.0.1 --port 8765
-# Em outro terminal, usando o mesmo RADAR_DB:
-python -m app.worker
+docker compose exec concurso-radar python -m app.manage backup
 ```
 
-O worker NÃO roda automaticamente dentro do processo da API: é um processo/contêiner separado. Teste a API publicamente apenas em `/healthz`; as rotas `/api/...` exigem sessão. Não existe endpoint aberto `/docs`.
+Copie o arquivo gerado para fora do servidor. Não inclua `.env` nem a chave MFA nos backups públicos.
 
-No painel, entre, clique **Verificar agora** e confira a aba **Fontes** até o término. Se todas as fontes tiverem falhado, não interprete “nenhum concurso” como ausência de concursos reais.
+**Atualizar:** `git pull && docker compose up -d --build`. Migrações rodam sozinhas e fazem backup antes de alterar o banco.
 
-## 6. Backup e migração v1.1 → v2
+**Versão e esquema:** `docker compose exec concurso-radar python -m app.manage version`.
 
-Antes de atualizar o volume da v1.1, crie um backup do banco e guarde-o fora da VPS. Exemplo com o serviço v1.1 ainda ativo:
+---
+
+## Estrutura
+
+```
+app/          backend FastAPI, coleta, validação, migrações
+static/       interface (HTML, CSS, módulos JS sem build)
+sources.yaml  fontes oficiais monitoradas
+tests/        testes automatizados
+```
+
+---
+
+## English summary
+
+**SpeedLora Radar** monitors Brazilian public-sector IT job notices from official sources. A notice is marked as confirmed only when the official document was downloaded, contains an IT role, and the dates and salary appear in the same text. Full version: [radar.speedlora.app](https://radar.speedlora.app).
+
+**Run it with Docker:**
 
 ```bash
-docker compose exec concurso-radar python -c "import sqlite3; a=sqlite3.connect('/data/radar.sqlite3'); b=sqlite3.connect('/data/backup-before-v2.sqlite3'); a.backup(b); b.close(); a.close()"
-# Em seguida copie o arquivo de backup para fora do contêiner e da VPS.
+cp .env.example .env        # set RADAR_PASSWORD (7+ chars); RADAR_COOKIE_SECURE=0 for localhost
+docker compose up -d --build
+# open http://127.0.0.1:8765
 ```
 
-Pelo mesmo nome de volume **`concurso_radar_data`**, a versão 2 cria tabelas adicionais sem recriar oportunidades; dados, favoritos e inscrições são preservados. Não modifique a configuração de volumes nem execute `down -v`. Mais detalhes e rollback em `docs/DEPLOY_VPS.md`.
+- **Public mode** (`RADAR_PUBLIC=1`): anyone can browse; only the admin can change anything.
+- **Private mode** (`RADAR_PUBLIC=0`): everything requires the admin login.
+- Sources live in `sources.yaml`; each can be disabled with `enabled: false`.
+- The collector reads `robots.txt`, respects 403/429 responses, and spaces out requests per domain.
+- Optional MFA, device/session management, and email or Telegram alerts (use *Send test alert* in Settings).
+- Tests: `docker build --target test -t radar-tests . && docker run --rm radar-tests`.
 
-## 7. Responsabilidades e limitações
+**Limits:** the validation is conservative and does not replace reading the official notice. Scanned PDFs may need manual review.
 
-- O sistema **não realiza inscrições** nem armazena CPF/senhas das bancas; os links levam aos sites oficiais.
-- É possível perder vagas se a fonte usar páginas dinâmicas, exigir CAPTCHA, publicar PDF não extraível, encerrar inscrição entre varreduras ou mudar a estrutura. A tela Fontes deve denunciar isso; não há garantia de cobertura total.
-- Confirme sempre retificações, inscrições, isenções, exigência de formação e cidades de prova diretamente no edital antes de tomar decisões.
-- Documentação adicional: `docs/ARQUITETURA.md`, `docs/CRITERIOS_DE_VALIDACAO.md`, `docs/FONTES_E_COBERTURA.md`, `docs/DEPLOY_VPS.md`, `docs/REGRESSAO.md`.
+---
 
-## Coleta educada, fila e bloqueios (v2.0.2)
-
-- O worker continua rodando **a cada 3 horas**, no horário de São Paulo.
-- A fila consulta até **3 fontes/domínios distintos ao mesmo tempo**; requisições para o mesmo domínio são **serializadas** com intervalo mínimo de 8 segundos (configurável).
-- `403 Forbidden`: o Radar **interrompe o acesso ao domínio por 12 horas**. Não insiste, não troca de identidade, não usa proxy ou CAPTCHA automático. Abas de fontes mostram **ACESSO SUSPENSO** e próximo horário de tentativa.
-- `429 Too Many Requests`: segue `Retry-After` (em segundos ou data HTTP). Sem cabeçalho, suspende por 3 horas.
-- Bloqueios são salvos no SQLite e compartilhados pela API e worker Docker. O botão **Verificar agora** não ignora o bloqueio: continua outras fontes, mas não faz requisições ao domínio pausado.
-- Essas medidas **reduzem o risco** de bloqueios; **não garantem remover 403** quando o portal decide não permitir coleta automatizada. Use o link oficial no painel quando a fonte estiver indisponível.
-- Variáveis opcionais: `RADAR_SOURCE_WORKERS=3`, `RADAR_DOMAIN_INTERVAL_SECONDS=8`. Evite aumentar velocidade por domínio.
-
-## Identidade e navegação
-
-Marca e ícone original do SpeedLora Life reutilizados **apenas como arquivos estáticos públicos** (`static/brand-symbol.png`, `favicon.ico`). Corrigido o alinhamento do conteúdo nas páginas curtas: o painel inicia no topo, inclusive na aba Configurações. Layout mobile conserva navegação horizontal sem aumentar o espaço vertical.
-
-### Atualizar a partir da versão anterior
-
-1. Faça backup do volume Docker antes de atualizar.
-2. Extraia a v2.0.2 e substitua apenas os arquivos versionados. **Preserve seu `.env`** e nunca substitua seu banco por um banco vazio.
-3. Mantenha os serviços e o nome do volume Compose: `concurso_radar_data`.
-4. Execute `docker compose up -d --build --force-recreate` (sem `down -v`).
-5. Consulte `docker compose ps`, abra `http://localhost:8765/healthz` e teste menu, favicon, login e página Fontes.
-6. Vunesp pode permanecer suspensa após novo 403. É uma decisão do domínio, não uma falha do container.
-
-### Inspeção visual no seu Windows (opcional)
-
-Com Python local, `pip install playwright` e `python -m playwright install chromium`, rode `python scripts/visual_regression.py --url http://127.0.0.1:8765 --password SUA_SENHA` para testar o menu no desktop e mobile. **Não coloque uma senha real em histórico de terminal compartilhado**. Idealmente use uma cópia local de teste com senha temporária. Este teste abre o navegador local; o ambiente da elaboração bloqueou esse tipo de acesso e não houve homologação visual automática aqui.
+Licença: veja [LICENSE](LICENSE).
