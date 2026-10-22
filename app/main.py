@@ -44,7 +44,7 @@ async def lifespan(app):
             f'Defina RADAR_PASSWORD com pelo menos {auth.MIN_PASSWORD_LENGTH} caracteres no .env (sem valor de exemplo)'
         )
     auth.bootstrap_password()
-    seeds.seed_official()  # v1.1 retained; NEW documentary gate requires reconfirmation.
+    seeds.seed_official()  # initial records stay pending until their notice is validated
     collectors.deadline_alerts()
     yield
 
@@ -141,7 +141,7 @@ def robots():
 
 @app.get('/healthz')
 def health():
-    return {'service': 'ok', 'date': clock.today().isoformat()}
+    return {'service': 'ok', 'version': __version__, 'date': clock.today().isoformat()}
 
 
 @app.get('/')

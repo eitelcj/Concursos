@@ -23,6 +23,8 @@ for name in [
     'Dockerfile',
     'compose.yaml',
     '.env.example',
+    'sources.yaml',
+    'README.md',
 ]:
     assert (root / name).is_file(), f'Arquivo ausente: {name}'
 assert len(collectors.SOURCES) >= 8

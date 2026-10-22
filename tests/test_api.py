@@ -141,3 +141,12 @@ def test_rate_limit():
         for _ in range(5):
             cli.post('/api/auth/login', json={'password': 'wrong'})
         assert cli.post('/api/auth/login', json={'password': 'Very-Strong-Password-TEST-1234'}).status_code == 429
+
+
+def test_healthz_reports_version():
+    from app import __version__
+
+    with TestClient(app) as cli:
+        body = cli.get('/healthz').json()
+    assert body['service'] == 'ok'
+    assert body['version'] == __version__
