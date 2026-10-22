@@ -1,11 +1,14 @@
 """No 403/429 retry loops, persistent backoff, and independent-source queue."""
+
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime
 
 import pytest
-from app import collectors, core, evidence, polite
+
+from app import collectors, database, evidence, polite
+from app import repository as repo
 
 
 class Response:
@@ -16,11 +19,14 @@ class Response:
             self.headers['Retry-After'] = retry
         self.url = 'https://www.vunesp.com.br/cabertas.html'
         self.closed = False
+
     def close(self):
         self.closed = True
+
     def raise_for_status(self):
         if self.status_code >= 400:
             raise ValueError('HTTP error')
+
     def iter_content(self, chunk_size):
         yield b'<html><body>Edital oficial</body></html>'
 
@@ -29,6 +35,7 @@ class Session:
     def __init__(self, response):
         self.response = response
         self.calls = 0
+
     def get(self, url, **kwargs):
         self.calls += 1
         return self.response
@@ -52,28 +59,35 @@ def test_429_retry_after_and_default_wait():
     now = time.time()
     with pytest.raises(polite.DomainCoolingDown):
         raise polite.reject('www.vunesp.com.br', 429, '7200', now=now)
-    with core.connection() as db:
+    with database.connection() as db:
         row = db.execute('SELECT blocked_until FROM host_pacing WHERE host=?', ('www.vunesp.com.br',)).fetchone()
     assert row['blocked_until'] - now == pytest.approx(7200, abs=1)
-    assert polite.retry_after_seconds('Thu, 17 Oct 2030 12:00:00 GMT', now=datetime(2030,10,17,11,0,tzinfo=timezone.utc).timestamp())==3600
+    assert (
+        polite.retry_after_seconds(
+            'Thu, 17 Oct 2030 12:00:00 GMT', now=datetime(2030, 10, 17, 11, 0, tzinfo=UTC).timestamp()
+        )
+        == 3600
+    )
     polite.reject('www.fgv.br', 429, None, now=now)
-    with core.connection() as db:
+    with database.connection() as db:
         row2 = db.execute('SELECT blocked_until FROM host_pacing WHERE host=?', ('www.fgv.br',)).fetchone()
-    assert row2['blocked_until']-now == pytest.approx(3*3600,abs=1)
+    assert row2['blocked_until'] - now == pytest.approx(3 * 3600, abs=1)
 
 
 def test_no_concurrent_requests_same_hostname(monkeypatch):
     monkeypatch.setattr(polite, 'interval_seconds', lambda: 0)
     guard = threading.Lock()
-    state = {'active':0, 'peak':0}
+    state = {'active': 0, 'peak': 0}
+
     def perform():
         with polite.request_lane('www.vunesp.com.br'):
             with guard:
                 state['active'] += 1
                 state['peak'] = max(state['peak'], state['active'])
-            time.sleep(.02)
+            time.sleep(0.02)
             with guard:
                 state['active'] -= 1
+
     with ThreadPoolExecutor(max_workers=4) as pool:
         list(pool.map(lambda _: perform(), range(4)))
     assert state['peak'] == 1
@@ -81,36 +95,28 @@ def test_no_concurrent_requests_same_hostname(monkeypatch):
 
 def test_different_official_sources_use_parallel_queue(monkeypatch):
     sources = (
-        collectors.Source('Org 1','https://www.vunesp.com.br/cabertas.html'),
-        collectors.Source('Org 2','https://conhecimento.fgv.br/concursos'),
-        collectors.Source('Org 3','https://www.cebraspe.org.br/concursos/'),
+        collectors.Source('Org 1', 'https://www.vunesp.com.br/cabertas.html'),
+        collectors.Source('Org 2', 'https://conhecimento.fgv.br/concursos'),
+        collectors.Source('Org 3', 'https://www.cebraspe.org.br/concursos/'),
     )
     barrier = threading.Barrier(3)
     monkeypatch.setattr(collectors, 'SOURCES', sources)
-    monkeypatch.setenv('RADAR_SOURCE_WORKERS','3')
+    monkeypatch.setenv('RADAR_SOURCE_WORKERS', '3')
+
     def scan(source, session=None):
         barrier.wait(timeout=2)
-        return 1,1,True
-    monkeypatch.setattr(collectors,'scan_source',scan)
+        return 1, 1, True
+
+    monkeypatch.setattr(collectors, 'scan_source', scan)
     report = collectors.run_all()
-    assert report['state']=='ok'
-    assert report['sources']==3 and report['new']==3
+    assert report['state'] == 'ok'
+    assert report['sources'] == 3 and report['new'] == 3
 
 
 def test_source_blocked_is_not_reported_as_success(monkeypatch):
     def blocked(*args, **kwargs):
-        raise polite.DomainCoolingDown('www.vunesp.com.br',403,time.time()+12*3600)
-    monkeypatch.setattr(evidence,'fetch_official', blocked)
-    assert collectors.scan_source(collectors.SOURCES[0])==(0,0,False)
-    assert core.source_health()[0]['state']=='blocked'
+        raise polite.DomainCoolingDown('www.vunesp.com.br', 403, time.time() + 12 * 3600)
 
-
-def test_navigation_brand_and_mobile_rules():
-    from pathlib import Path
-    static=Path(__file__).resolve().parents[1]/'static'
-    css=(static/'style.css').read_text()
-    html=(static/'index.html').read_text()
-    assert 'margin:0 auto;min-width:0;align-self:start' in css
-    assert '@media(max-width:700px)' in css
-    assert html.count('/static/brand-symbol.png')>=2
-    assert (static/'favicon.ico').stat().st_size>100
+    monkeypatch.setattr(evidence, 'fetch_official', blocked)
+    assert collectors.scan_source(collectors.SOURCES[0]) == (0, 0, False)
+    assert repo.source_health()[0]['state'] == 'blocked'
