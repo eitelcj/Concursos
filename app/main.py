@@ -28,6 +28,9 @@ from . import (
     textnorm,
 )
 from . import repository as repo
+from . import (
+    sources as source_catalog,
+)
 
 BASE = Path(__file__).resolve().parent.parent
 
@@ -423,11 +426,27 @@ def sources():
         'running': collectors.LOCK.locked(),
         'configured': len(collectors.SOURCES),
         'catalog': [
-            {'name': s.name, 'url': s.url, 'mode': s.mode, 'pacing': host_state.get(polite.hostname(s.url), {})}
-            for s in collectors.SOURCES
+            {
+                'name': s.name,
+                'url': s.url,
+                'mode': s.mode,
+                'agency': s.agency,
+                'uf': s.uf,
+                'enabled': s.enabled,
+                'pacing': host_state.get(polite.hostname(s.url), {}),
+            }
+            for s in all_sources()
         ],
         'notifications_configured': config.notifications_configured(),
     }
+
+
+def all_sources():
+    """Every source in sources.yaml, enabled or not. Falls back to the active list if the file is broken."""
+    try:
+        return source_catalog.load()
+    except source_catalog.SourceError:
+        return collectors.SOURCES
 
 
 @app.post('/api/scan', status_code=202)
