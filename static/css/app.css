@@ -159,6 +159,11 @@ pre {
 .hidden {
   display: none !important;
 }
+/* Visitors (public mode) never see admin controls, and admins never see the visitor login button. */
+body:not(.is-admin) .admin-only,
+body.is-admin .visitor-only {
+  display: none !important;
+}
 .sr-only {
   position: absolute;
   width: 1px;

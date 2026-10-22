@@ -10,7 +10,8 @@ def login(client):
     return r.json()['csrf']
 
 
-def test_login_password_only_and_logout():
+def test_login_password_only_and_logout(monkeypatch):
+    monkeypatch.setenv('RADAR_PUBLIC', '0')
     with TestClient(app) as cli:
         assert cli.get('/healthz').status_code == 200
         assert cli.get('/api/opportunities').status_code == 401

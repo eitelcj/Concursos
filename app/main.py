@@ -1,7 +1,8 @@
-"""FastAPI: private single-admin radar, hard gate for verified documents."""
+"""FastAPI app: public read-only portal (optional) + single-admin area, with a hard gate for verified notices."""
 
 import csv
 import io
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlparse
@@ -41,7 +42,7 @@ async def lifespan(app):
 
 
 app = FastAPI(
-    title='SpeedLora Concurso Radar',
+    title='Radar Public Sector',
     version=__version__,
     lifespan=lifespan,
     docs_url=None,
@@ -50,7 +51,16 @@ app = FastAPI(
 )
 app.add_middleware(GZipMiddleware, minimum_size=800)
 
-PUBLIC = {'/healthz', '/', '/favicon.ico', '/api/auth/login', '/api/auth/status'}
+# Always reachable without a session.
+AUTH_FREE = {'/healthz', '/', '/favicon.ico', '/robots.txt', '/api/auth/login', '/api/auth/status'}
+# Read-only endpoints opened to visitors when RADAR_PUBLIC=1. Everything else is admin-only (deny by default).
+PUBLIC_READ = (
+    re.compile(r'^/api/opportunities(/\d+)?$'),
+    re.compile(r'^/api/(alerts|sources)$'),
+    re.compile(r'^/api/export\.csv$'),
+)
+# Personal admin data never shown to visitors.
+PRIVATE_FIELDS = ('notes', 'favorite', 'applied', 'dismissed')
 STATIC_DIR = (BASE / 'static').resolve()
 STATIC_TYPES = {
     '.css': 'text/css; charset=utf-8',
@@ -62,8 +72,23 @@ STATIC_TYPES = {
 }
 
 
-def is_public(path):
-    return path in PUBLIC or path.startswith('/static/')
+def needs_admin(path, method):
+    if path in AUTH_FREE or path.startswith('/static/'):
+        return False
+    if method in ('GET', 'HEAD') and config.public_mode():
+        return not any(pattern.match(path) for pattern in PUBLIC_READ)
+    return True
+
+
+def is_admin(request):
+    return bool(getattr(request.state, 'session', None))
+
+
+def visible(items, request):
+    """Admins see everything; visitors get the public view (no hidden items, no personal fields)."""
+    if is_admin(request):
+        return items
+    return [{k: v for k, v in item.items() if k not in PRIVATE_FIELDS} for item in items if not item.get('dismissed')]
 
 
 @app.middleware('http')
@@ -77,10 +102,11 @@ async def gate(request: Request, call_next):
             return JSONResponse({'detail': 'Apenas application/json'}, status_code=415)
     session = auth.validate_session(request.cookies.get(auth.COOKIE))
     request.state.session = session
-    if not is_public(path) and not session:
+    admin_only = needs_admin(path, request.method)
+    if admin_only and not session:
         return JSONResponse({'detail': 'Autenticação necessária'}, status_code=401)
     if (
-        not is_public(path)
+        admin_only
         and request.method in ('POST', 'PUT', 'PATCH', 'DELETE')
         and not auth.csrf_valid(session, request.headers.get('X-CSRF-Token', ''))
     ):
@@ -95,6 +121,12 @@ async def gate(request: Request, call_next):
         "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
     )
     return response
+
+
+@app.get('/robots.txt')
+def robots():
+    body = 'User-agent: *\nAllow: /\n' if config.public_mode() else 'User-agent: *\nDisallow: /\n'
+    return Response(body, media_type='text/plain')
 
 
 @app.get('/healthz')
@@ -125,10 +157,11 @@ def static(file_path: str):
 @app.get('/api/auth/status')
 def status(request: Request):
     # The CSRF token is only echoed back to an authenticated same-origin session.
-    authenticated = bool(request.state.session)
+    authenticated = is_admin(request)
     return {
         'authenticated': authenticated,
-        'mfa_enabled': auth.mfa_enabled(),
+        'public': config.public_mode(),
+        'mfa_enabled': auth.mfa_enabled() if authenticated else None,
         'csrf': request.cookies.get('radar_csrf', '') if authenticated else None,
     }
 
@@ -204,16 +237,17 @@ async def mfa_disable(request: Request):
 
 
 @app.get('/api/opportunities')
-def opportunities():
-    return {'items': repo.query_opportunities(), 'as_of': clock.now()}
+def opportunities(request: Request):
+    return {'items': visible(repo.query_opportunities(), request), 'as_of': clock.now()}
 
 
 @app.get('/api/opportunities/{oid}')
-def opportunity(oid: int):
+def opportunity(oid: int, request: Request):
     item = repo.fetch_one(oid)
-    if not item:
+    shown = visible([item], request) if item else []
+    if not shown:
         raise HTTPException(404)
-    return item
+    return shown[0]
 
 
 @app.post('/api/opportunities', status_code=201)
@@ -310,8 +344,8 @@ def scan_now(background_tasks: BackgroundTasks):
 
 
 @app.get('/api/export.csv')
-def export_csv():
-    rows = repo.query_opportunities()
+def export_csv(request: Request):
+    rows = visible(repo.query_opportunities(), request)
     fields = [
         'title',
         'agency',
@@ -333,6 +367,8 @@ def export_csv():
         'applied',
         'notes',
     ]
+    if not is_admin(request):
+        fields = [f for f in fields if f not in PRIVATE_FIELDS]
     out = io.StringIO()
     writer = csv.DictWriter(out, fieldnames=fields, extrasaction='ignore')
     writer.writeheader()

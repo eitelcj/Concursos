@@ -38,6 +38,11 @@ def admin_password():
     return os.getenv('RADAR_PASSWORD', '')
 
 
+def public_mode():
+    """RADAR_PUBLIC=1 (default): anyone can browse the list; 0: everything requires the admin login."""
+    return os.getenv('RADAR_PUBLIC', '1') != '0'
+
+
 def cookie_secure():
     return os.getenv('RADAR_COOKIE_SECURE', '1') == '1'
 

@@ -23,6 +23,7 @@ function currentRoute() {
 
 function navigate() {
   const route = currentRoute();
+  if (location.hash === '#entrar') return;
   for (const r of ROUTES) $(`#view-${r.id}`).classList.toggle('hidden', r !== route);
   for (const link of $$('.nav-link')) {
     if (link.dataset.route === route.id) link.setAttribute('aria-current', 'page');
@@ -38,28 +39,40 @@ function buildNav() {
   ).join('');
 }
 
-function showApp(authenticated) {
-  state.authenticated = authenticated;
-  $('#appView').classList.toggle('hidden', !authenticated);
-  $('#loginView').classList.toggle('hidden', authenticated);
+/** Decide what to show: the app (admin or public visitor) or the login screen. */
+function render() {
+  const wantsLogin = location.hash === '#entrar';
+  const showLogin = !state.admin && (!state.publicMode || wantsLogin);
+  document.body.classList.toggle('is-admin', state.admin);
+  $('#appView').classList.toggle('hidden', showLogin);
+  $('#loginView').classList.toggle('hidden', !showLogin);
+  $('#loginBack').classList.toggle('hidden', !state.publicMode);
+  if (showLogin) {
+    document.title = 'Entrar · Radar Public Sector';
+    $('#loginForm input[type=password]').focus();
+  } else {
+    if (wantsLogin) history.replaceState(null, '', '#concursos');
+    navigate();
+  }
 }
 
 export async function loadAll() {
+  if (!state.admin && !state.publicMode) return;
   try {
-    const [opportunities, alerts, sources, candidates] = await Promise.all([
-      api('/api/opportunities'),
-      api('/api/alerts'),
-      api('/api/sources'),
-      api('/api/candidates'),
-    ]);
+    const requests = [api('/api/opportunities'), api('/api/alerts'), api('/api/sources')];
+    if (state.admin) requests.push(api('/api/candidates'));
+    const [opportunities, alerts, sources, candidates] = await Promise.all(requests);
     state.items = opportunities.items;
     state.alerts = alerts.items;
     state.sources = sources;
-    state.candidates = candidates.items;
+    state.candidates = candidates ? candidates.items : [];
     state.loaded = true;
     for (const r of ROUTES) r.view.render();
   } catch (error) {
-    if (error instanceof ApiError && error.status === 401) return showApp(false);
+    if (error instanceof ApiError && error.status === 401) {
+      state.admin = false;
+      return render();
+    }
     toast(error.message);
   }
 }
@@ -77,10 +90,12 @@ async function login(event) {
       return;
     }
     setCsrf(result.csrf);
+    state.admin = true;
     state.mfa = result.mfa_enabled;
     form.reset();
     $('#otpField').classList.add('hidden');
-    showApp(true);
+    if (location.hash === '#entrar') history.replaceState(null, '', '#concursos');
+    render();
     await loadAll();
   } catch (error) {
     $('#loginError').textContent = error.message;
@@ -92,34 +107,36 @@ async function logout() {
     await post('/api/auth/logout');
   } finally {
     setCsrf('');
-    showApp(false);
+    state.admin = false;
     $('#loginForm').reset();
     $('#otpField').classList.add('hidden');
+    render();
+    await loadAll();
   }
 }
 
 async function init() {
   buildNav();
   for (const r of ROUTES) r.view.mount($(`#view-${r.id}`), loadAll);
+  for (const slot of $$('[data-icon]')) slot.outerHTML = icon(slot.dataset.icon);
   theme.bindToggle($('#themeToggle'));
-  $('#logoutBtn').querySelector('[data-icon]').outerHTML = icon('logout');
   $('#loginForm').addEventListener('submit', login);
   $('#logoutBtn').addEventListener('click', logout);
-  window.addEventListener('hashchange', navigate);
+  window.addEventListener('hashchange', render);
   window.addEventListener('scroll', () => $('#topbar').classList.toggle('scrolled', window.scrollY > 4), { passive: true });
-  navigate();
   try {
     const status = await api('/api/auth/status');
-    state.mfa = status.mfa_enabled;
+    state.admin = status.authenticated;
+    state.publicMode = status.public;
+    state.mfa = Boolean(status.mfa_enabled);
     setCsrf(status.csrf);
-    showApp(status.authenticated);
-    if (status.authenticated) await loadAll();
   } catch (error) {
-    showApp(false);
     toast(error.message);
   }
+  render();
+  await loadAll();
   setInterval(() => {
-    if (!document.hidden && state.authenticated) loadAll();
+    if (!document.hidden) loadAll();
   }, 90_000);
 }
 

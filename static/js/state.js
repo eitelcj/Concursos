@@ -1,6 +1,7 @@
 // Shared client state; views read from here and main.js refreshes it.
 export const state = {
-  authenticated: false,
+  admin: false,
+  publicMode: true,
   mfa: false,
   items: [],
   alerts: [],
