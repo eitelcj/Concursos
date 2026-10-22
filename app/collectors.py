@@ -7,38 +7,20 @@ import logging
 import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
 from datetime import date, datetime
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
-from . import clock, config, database, evidence, polite, textnorm
+from . import clock, config, database, evidence, polite, sources, textnorm
 from . import repository as repo
 
 LOG = logging.getLogger(__name__)
+Source = sources.Source
 LOCK = threading.Lock()
 
 
-@dataclass(frozen=True)
-class Source:
-    name: str
-    url: str
-    mode: str = 'catalog'
-
-
-SOURCES = (
-    Source('Vunesp — inscrições abertas', 'https://www.vunesp.com.br/cabertas.html'),
-    Source('Vunesp — próximos', 'https://www.vunesp.com.br/busca/concurso/proximo'),
-    Source('FGV Conhecimento', 'https://conhecimento.fgv.br/concursos'),
-    Source('Fundação Carlos Chagas', 'https://www.concursosfcc.com.br/'),
-    Source('IBAM — editais', 'https://www.ibam-concursos.org.br/', 'notice_index'),
-    Source('ABCP — concursos', 'https://abcp.selecao.net.br/'),
-    Source('Cebraspe — CGU 2026', 'https://www.cebraspe.org.br/concursos/CGU_26_AFFC', 'details'),
-    Source('IFSP — 183/2026', 'https://concursopublico.ifsp.edu.br/editais/edital-1832026-docentes', 'details'),
-    Source('Prefeitura de Campinas', 'https://campinas.sp.gov.br/', 'watch'),
-    Source('Diário Oficial do Estado SP', 'https://doe.sp.gov.br/', 'watch'),
-)
+SOURCES = sources.active(sources.load())
 
 
 def hrefs(html, base):

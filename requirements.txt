@@ -5,3 +5,4 @@ beautifulsoup4>=4.12,<5
 pypdf>=5,<7
 cryptography>=43,<47
 qrcode[pil]>=7.4,<9
+PyYAML>=6,<7

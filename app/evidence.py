@@ -14,7 +14,7 @@ import requests
 from bs4 import BeautifulSoup
 from pypdf import PdfReader
 
-from . import __version__, polite, textnorm
+from . import __version__, polite, robots, textnorm
 
 # Exact hosts or government / public-school namespaces. No partial substring matches.
 ORGANIZERS = frozenset(
@@ -98,6 +98,7 @@ def fetch_official(url, session=None, *, pace=None):
         host = urlparse(current).hostname
         if session is None:
             guard_public(host)
+            robots.check(current)
         from contextlib import nullcontext
 
         with polite.request_lane(host) if pace else nullcontext():
