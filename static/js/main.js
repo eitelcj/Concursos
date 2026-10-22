@@ -30,7 +30,7 @@ function navigate() {
     else link.removeAttribute('aria-current');
   }
   $('#pageTitle').textContent = route.label;
-  document.title = `${route.label} · Radar Public Sector`;
+  document.title = `${route.label} · SpeedLora Radar`;
 }
 
 function buildNav() {
@@ -48,7 +48,7 @@ function render() {
   $('#loginView').classList.toggle('hidden', !showLogin);
   $('#loginBack').classList.toggle('hidden', !state.publicMode);
   if (showLogin) {
-    document.title = 'Entrar · Radar Public Sector';
+    document.title = 'Entrar · SpeedLora Radar';
     $('#loginForm input[type=password]').focus();
   } else {
     if (wantsLogin) history.replaceState(null, '', '#concursos');

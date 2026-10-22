@@ -42,7 +42,7 @@ async def lifespan(app):
 
 
 app = FastAPI(
-    title='Radar Public Sector',
+    title='SpeedLora Radar',
     version=__version__,
     lifespan=lifespan,
     docs_url=None,
