@@ -66,7 +66,7 @@ PUBLIC_READ = (
     re.compile(r'^/api/export\.csv$'),
 )
 # Personal admin data never shown to visitors.
-PRIVATE_FIELDS = ('notes', 'favorite', 'applied', 'dismissed')
+PRIVATE_FIELDS = ('notes', 'favorite', 'applied', 'dismissed', 'stage')
 STATIC_DIR = (BASE / 'static').resolve()
 STATIC_TYPES = {
     '.css': 'text/css; charset=utf-8',
@@ -460,6 +460,7 @@ def export_csv(request: Request):
         'document_verified',
         'favorite',
         'applied',
+        'stage',
         'notes',
     ]
     if not is_admin(request):

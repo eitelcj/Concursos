@@ -87,7 +87,10 @@ CREATE INDEX IF NOT EXISTS idx_security_events_at ON security_events(at);
 DROP TABLE IF EXISTS auth_sessions;
 """
 
+STAGE_SQL = "ALTER TABLE opportunities ADD COLUMN stage TEXT NOT NULL DEFAULT '';"
+
 MIGRATIONS = [
     (1, 'v2 schema', V2_SCHEMA),
     (2, 'account security: sessions with devices, trusted devices, security events', ACCOUNT_SECURITY),
+    (3, 'acompanhamento: etapa pessoal do concurso', STAGE_SQL),
 ]

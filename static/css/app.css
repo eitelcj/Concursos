@@ -1156,3 +1156,18 @@ dialog::backdrop {
   font-size: 12px;
   overflow-wrap: anywhere;
 }
+
+.stage-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.stage-field span {
+  white-space: nowrap;
+}
+.stage-field .select {
+  min-width: 170px;
+}

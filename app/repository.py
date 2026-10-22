@@ -31,6 +31,7 @@ FIELDS = (
     'national',
     'favorite',
     'applied',
+    'stage',
     'dismissed',
     'status_override',
     'type',
@@ -44,6 +45,9 @@ def fingerprint(title, agency='', position='', official_url=''):
     # Official notice URL wins when available, otherwise stable normalized title+agency.
     raw = '|'.join((agency, title, position, official_url.strip().split('#')[0]))
     return hashlib.sha256(fold(raw).encode()).hexdigest()[:32]
+
+
+STAGES = ('', 'interesse', 'inscrito', 'prova', 'resultado', 'desisti')
 
 
 def validate(data, partial=False):
@@ -63,6 +67,8 @@ def validate(data, partial=False):
             raise ValueError(f'{k} deve ser número não negativo')
     if data.get('confidence') is not None and data['confidence'] not in ('official', 'reported', 'discovery'):
         raise ValueError('Origem de confiança inválida')
+    if data.get('stage') is not None and data['stage'] not in STAGES:
+        raise ValueError('Etapa inválida')
     if data.get('status_override') and data['status_override'] not in ('announced', 'suspended', 'cancelled', 'open'):
         raise ValueError('Status manual inválido')
 
