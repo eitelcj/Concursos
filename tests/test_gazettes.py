@@ -61,7 +61,9 @@ def test_finds_it_contests_in_municipal_gazettes(monkeypatch):
     calls = fake_api(monkeypatch, RESPONSE)
     found, added, ok = gazettes.scan_source(SOURCE)
     assert (found, added, ok) == (2, 2, True)
-    assert calls[0][1] is True and 'querystring=' in calls[0][0] and 'published_since=2026-09-24' in calls[0][0]
+    assert len(calls) == len(gazettes.TERMS) and all(data_api for _, data_api in calls)
+    assert 'querystring=%22concurso+p%C3%BAblico%22+%22tecnologia' in calls[0][0]
+    assert 'published_since=2026-09-24' in calls[0][0] and '%7C' not in calls[0][0] and '%28' not in calls[0][0]
     items = {i['agency']: i for i in repo.query_opportunities()}
     campinas = items['Campinas/SP']
     assert campinas['position'] == 'Analista de Sistemas'
@@ -100,3 +102,16 @@ def test_bad_json_is_reported(monkeypatch):
     monkeypatch.setattr(evidence, 'fetch_official', lambda url, session=None, **k: (url, b'<html>', 'text/html'))
     assert gazettes.scan_source(SOURCE)[2] is False
     assert 'JSON' in repo.source_health()[0]['error']
+
+
+def test_one_failing_search_keeps_the_others(monkeypatch):
+    def fetch(url, session=None, *, pace=None, data_api=False):
+        if 'programador' in url:
+            raise ValueError('500 Server Error: Internal Server Error for url: x')
+        return url, json.dumps(RESPONSE).encode(), 'application/json'
+
+    monkeypatch.setattr(evidence, 'fetch_official', fetch)
+    found, added, ok = gazettes.scan_source(SOURCE)
+    assert (found, added, ok) == (2, 2, False)
+    error = repo.source_health()[0]['error']
+    assert error.startswith('Cobertura PARCIAL: 1 de 8') and 'for url' not in error

@@ -19,13 +19,20 @@ from . import clock, evidence, polite, textnorm
 from . import repository as repo
 
 LOG = logging.getLogger('radar.gazettes')
-QUERY = (
-    '+"concurso público" +("tecnologia da informação" | informática | "analista de sistemas" | '
-    '"desenvolvimento de sistemas" | "ciência de dados" | "segurança da informação" | programador | '
-    '"banco de dados" | "suporte técnico")'
+# One simple query per IT term. A single query with operators made the public API
+# answer HTTP 500, and narrow queries keep each search light for their servers.
+TERMS = (
+    'tecnologia da informação',
+    'analista de sistemas',
+    'informática',
+    'desenvolvimento de sistemas',
+    'ciência de dados',
+    'segurança da informação',
+    'programador',
+    'banco de dados',
 )
 LOOKBACK_DAYS = 21
-PAGE_SIZE = 50
+PAGE_SIZE = 20
 MAX_NEW_PER_RUN = 25
 # Publications about contests that are already over (or that are not openings).
 SKIP = (
@@ -88,27 +95,52 @@ def official_links(text):
     return links
 
 
-def search_url(source):
-    params = {
-        'querystring': QUERY,
-        'published_since': (clock.today() - timedelta(days=LOOKBACK_DAYS)).isoformat(),
-        'excerpt_size': 600,
-        'number_of_excerpts': 3,
-        'size': PAGE_SIZE,
-    }
-    return source.url.split('?', 1)[0] + '?' + urlencode(params)
+def search_urls(source):
+    since = (clock.today() - timedelta(days=LOOKBACK_DAYS)).isoformat()
+    base = source.url.split('?', 1)[0]
+    for term in TERMS:
+        params = {
+            'querystring': f'"concurso público" "{term}"',
+            'published_since': since,
+            'excerpt_size': 500,
+            'number_of_excerpts': 2,
+            'size': PAGE_SIZE,
+        }
+        yield base + '?' + urlencode(params)
+
+
+def fetch_gazettes(source, session):
+    """Run every term; a failing search does not lose the others. Returns (gazettes, errors)."""
+    found, errors, seen = [], [], set()
+    for url in search_urls(source):
+        try:
+            _, raw, _ = evidence.fetch_official(url, session, data_api=True)
+            data = json.loads(raw.decode('utf-8'))
+        except polite.DomainCoolingDown:
+            raise
+        except json.JSONDecodeError:
+            errors.append('resposta não é JSON')
+            continue
+        except Exception as err:
+            # requests puts the whole (long) URL in the message; the term is enough.
+            errors.append(str(err).split(' for url:')[0])
+            continue
+        for gazette in data.get('gazettes') or []:
+            key = gazette.get('url') or gazette.get('txt_url')
+            if key and key not in seen:
+                seen.add(key)
+                found.append(gazette)
+    return found, errors
 
 
 def scan_source(source, session=None):
     sid = repo.scan_start(source.name)
     found = added = 0
     try:
-        _, raw, _ = evidence.fetch_official(search_url(source), session, data_api=True)
-        try:
-            data = json.loads(raw.decode('utf-8'))
-        except ValueError as err:
-            raise ValueError('Resposta da API do Querido Diário não é JSON') from err
-        for gazette in data.get('gazettes') or []:
+        results, errors = fetch_gazettes(source, session)
+        if errors and len(errors) == len(TERMS):
+            raise ValueError(f'API do Querido Diário falhou em todas as buscas: {errors[0]}')
+        for gazette in results:
             uf = str(gazette.get('state_code') or '').upper()
             if source.uf and uf != source.uf:
                 continue
@@ -156,6 +188,14 @@ def scan_source(source, session=None):
                     f'Possível concurso de TI no Diário Oficial de {town}/{uf}: {role or "cargo a conferir"}.',
                     oid,
                 )
+        if errors:
+            repo.scan_finish(
+                sid,
+                found,
+                added,
+                error=f'Cobertura PARCIAL: {len(errors)} de {len(TERMS)} buscas falharam ({errors[0]})',
+            )
+            return found, added, False
         repo.scan_finish(sid, found, added)
         return found, added, True
     except polite.DomainCoolingDown as ex:
