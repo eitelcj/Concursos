@@ -25,3 +25,5 @@ quote-style = "single"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+# Starlette suggests another HTTP client package for TestClient; the current one works and is pinned.
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient`"]

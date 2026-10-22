@@ -95,7 +95,7 @@ docker compose exec concurso-radar python -m app.manage backup
 
 Copie o arquivo gerado para fora do servidor. Não inclua `.env` nem a chave MFA nos backups públicos.
 
-**Atualizar:** `git pull && docker compose up -d --build`. Migrações rodam sozinhas e fazem backup antes de alterar o banco.
+**Atualizar:** `git pull && docker compose up -d --build`. Cada tag `vX.Y.Z` publica também a imagem pronta `ghcr.io/flemuh/radar-public-sector` no GitHub, se você preferir não construir localmente. Migrações rodam sozinhas e fazem backup antes de alterar o banco.
 
 **Versão e esquema:** `docker compose exec concurso-radar python -m app.manage version`.
 
@@ -130,6 +130,7 @@ docker compose up -d --build
 - The collector reads `robots.txt`, respects 403/429 responses, and spaces out requests per domain.
 - Optional MFA, device/session management, and email or Telegram alerts (use *Send test alert* in Settings).
 - Tests: `docker build --target test -t radar-tests . && docker run --rm radar-tests`.
+- Every `vX.Y.Z` tag also publishes a ready-made image to `ghcr.io/flemuh/radar-public-sector`.
 
 **Limits:** the validation is conservative and does not replace reading the official notice. Scanned PDFs may need manual review.
 
