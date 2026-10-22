@@ -10,6 +10,15 @@ let root;
 let refresh = async () => {};
 let defaultApplied = false;
 
+const STAGE_LABELS = {
+  '': 'Sem etapa',
+  interesse: 'Tenho interesse',
+  inscrito: 'Inscrito',
+  prova: 'Prova marcada',
+  resultado: 'Aguardando resultado',
+  desisti: 'Desisti',
+};
+
 /** Lowercase and without accents, so “sao paulo” finds “São Paulo” and “fiscal” finds “Fiscal”. */
 const fold = (value) =>
   String(value ?? '')
@@ -86,6 +95,7 @@ export function mount(container, onRefresh) {
   $('#scanBtn', root).addEventListener('click', scan);
   $('#addBtn', root).addEventListener('click', () => openEditor(null, refresh));
   $('#items', root).addEventListener('click', onAction);
+  $('#items', root).addEventListener('change', onStageChange);
 }
 
 function facts(item) {
@@ -134,6 +144,9 @@ function card(item) {
         <button class="btn btn-sm" type="button" data-action="edit">${icon('edit')}Editar</button>
         <button class="btn btn-sm" type="button" data-action="verify">${icon('shield')}${item.document_verified ? 'Revalidar' : 'Validar edital'}</button>
         <button class="btn btn-sm" type="button" data-action="applied">${item.applied ? 'Desmarcar inscrição' : 'Marcar inscrição'}</button>
+        <label class="stage-field"><span>Minha etapa</span>
+          <select class="select" data-stage-select="${item.id}">${Object.entries(STAGE_LABELS).map(([v, l]) => `<option value="${v}" ${(item.stage || '') === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
+        </label>
       </div>
     </div>
     <details>
@@ -248,4 +261,17 @@ function fillStates(visible) {
     return;
   }
   select.value = [...select.options].some((o) => o.value === current) ? current : 'all';
+}
+
+/** Admin-only: the personal stage of a contest. Stored privately; visitors never receive it. */
+async function onStageChange(event) {
+  const select = event.target.closest('[data-stage-select]');
+  if (!select) return;
+  try {
+    await patch(`/api/opportunities/${select.dataset.stageSelect}`, { stage: select.value });
+    toast(`Etapa: ${STAGE_LABELS[select.value]}`);
+    await refresh();
+  } catch (error) {
+    toast(error.message);
+  }
 }
