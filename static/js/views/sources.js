@@ -58,6 +58,8 @@ export function render() {
       ${data.running ? `<span class="badge badge-upcoming">${icon('refresh')}Varredura em andamento</span>` : ''}
     </div>
     <div class="list">${catalog.map((s) => sourceRow(s, health)).join('') || '<div class="empty">Nenhuma fonte configurada.</div>'}</div>
-    <div class="section-head"><h2 class="section-title">Editais encontrados para triagem</h2></div>
-    <div class="list">${state.candidates.map(candidateRow).join('') || `<div class="empty">${icon('inbox')}<span>Nenhum edital detectado automaticamente ainda.</span></div>`}</div>`;
+    <div class="admin-only view">
+      <div class="section-head"><h2 class="section-title">Editais encontrados para triagem</h2></div>
+      <div class="list">${state.candidates.map(candidateRow).join('') || `<div class="empty">${icon('inbox')}<span>Nenhum edital detectado automaticamente ainda.</span></div>`}</div>
+    </div>`;
 }

@@ -26,7 +26,7 @@
         <span><strong>Radar Public Sector</strong><small>Concursos públicos de TI</small></span>
       </a>
       <div>
-        <h1>Entrar</h1>
+        <h1>Área do administrador</h1>
         <p class="muted">Use a senha do administrador. Se o MFA estiver ativo, o código será pedido em seguida.</p>
       </div>
       <label class="field">Senha
@@ -37,6 +37,7 @@
       </label>
       <button class="btn btn-primary" type="submit">Entrar</button>
       <p id="loginError" class="form-error" role="alert"></p>
+      <a class="btn btn-ghost hidden" id="loginBack" href="#concursos">← Voltar aos concursos</a>
     </form>
   </div>
 
@@ -65,7 +66,9 @@
       </div>
       <div class="topbar-actions">
         <button class="icon-btn" id="themeToggle" type="button" aria-label="Alternar tema claro/escuro"></button>
-        <button class="btn btn-ghost" id="logoutBtn" type="button"><span class="btn-icon" data-icon="logout"></span><span class="btn-label">Sair</span></button>
+        <a class="btn btn-ghost visitor-only" id="loginBtn" href="#entrar"><span data-icon="shield"></span><span class="btn-label">Entrar</span></a>
+        <span class="badge badge-info admin-only">Admin</span>
+        <button class="btn btn-ghost admin-only" id="logoutBtn" type="button"><span data-icon="logout"></span><span class="btn-label">Sair</span></button>
       </div>
     </header>
 

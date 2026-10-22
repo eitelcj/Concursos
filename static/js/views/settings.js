@@ -19,7 +19,7 @@ export function mount(container) {
           <button type="button" data-theme-choice="auto">${icon('monitor')}Automático</button>
         </div>
       </section>
-      <section class="panel" id="mfaPanel">
+      <section class="panel admin-only" id="mfaPanel">
         <h3>Verificação em duas etapas (MFA)</h3>
         <p class="muted" id="mfaStatus"></p>
         <form id="mfaSetupForm" class="form-grid">

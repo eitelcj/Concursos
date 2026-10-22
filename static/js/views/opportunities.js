@@ -3,6 +3,7 @@ import { $, esc, safeUrl, toast } from '../dom.js';
 import { STATUS_LABELS, dateTime, period, plural, salary } from '../format.js';
 import { icon } from '../icons.js';
 import { state } from '../state.js';
+import { isFavorite, toggleLocalFavorite } from '../favorites.js';
 import { openEditor } from './editor.js';
 
 let root;
@@ -24,8 +25,8 @@ export function mount(container, onRefresh) {
           <label class="sr-only" for="search">Buscar</label>
           <input class="input" type="search" id="search" placeholder="Buscar cargo, órgão ou cidade" autocomplete="off">
         </div>
-        <button class="btn" id="scanBtn" type="button">${icon('refresh')}<span>Verificar agora</span></button>
-        <button class="btn btn-primary" id="addBtn" type="button">${icon('plus')}<span>Concurso</span></button>
+        <button class="btn admin-only" id="scanBtn" type="button">${icon('refresh')}<span>Verificar agora</span></button>
+        <button class="btn btn-primary admin-only" id="addBtn" type="button">${icon('plus')}<span>Concurso</span></button>
       </div>
       <div class="filters">
         <label class="sr-only" for="status">Situação</label>
@@ -100,12 +101,12 @@ function card(item) {
         <h3 class="opp-title">${esc(item.title)}</h3>
         <p class="opp-sub">${esc(item.agency || item.source || 'Órgão não informado')} · ${esc(item.position || 'Cargo de TI a especificar')}</p>
       </div>
-      <button class="icon-btn" type="button" data-action="favorite" aria-pressed="${item.favorite ? 'true' : 'false'}" aria-label="${item.favorite ? 'Remover dos favoritos' : 'Favoritar'}">${icon('star')}</button>
+      <button class="icon-btn" type="button" data-action="favorite" aria-pressed="${isFavorite(item) ? 'true' : 'false'}" aria-label="${isFavorite(item) ? 'Remover dos favoritos' : 'Favoritar'}">${icon('star')}</button>
     </div>
     ${facts(item)}
     <div class="opp-foot">
       <div class="opp-links">${links || '<span class="muted">Sem links oficiais</span>'}</div>
-      <div class="opp-admin">
+      <div class="opp-admin admin-only">
         <button class="btn btn-sm" type="button" data-action="edit">${icon('edit')}Editar</button>
         <button class="btn btn-sm" type="button" data-action="verify">${icon('shield')}${item.document_verified ? 'Revalidar' : 'Validar edital'}</button>
         <button class="btn btn-sm" type="button" data-action="applied">${item.applied ? 'Desmarcar inscrição' : 'Marcar inscrição'}</button>
@@ -113,7 +114,7 @@ function card(item) {
     </div>
     <details>
       <summary>Observações e auditoria</summary>
-      <p>${esc(item.notes || 'Sem observações.')}</p>
+      ${item.notes ? `<p>${esc(item.notes)}</p>` : ''}
       <p class="muted">Origem: ${esc(item.source || '—')} · ${audit}</p>
       ${excerpt ? `<p class="muted">Trecho do edital: “${esc(excerpt)}”</p>` : ''}
     </details>
@@ -132,7 +133,7 @@ export function render() {
   const region = $('#region', root).value;
   const rich = $('#salary', root).checked;
   const list = visible.filter((i) =>
-    (status === 'all' || (status === 'favorite' ? i.favorite : i.status === status)) &&
+    (status === 'all' || (status === 'favorite' ? isFavorite(i) : i.status === status)) &&
     (region === 'all' || (region === 'sp' ? i.eligible_sp : i.national)) &&
     (!rich || i.salary_highlight) &&
     (!query || [i.title, i.agency, i.position, i.work_cities, i.exam_cities].join(' ').toLocaleLowerCase('pt-BR').includes(query)));
@@ -161,6 +162,11 @@ async function onAction(event) {
   try {
     switch (button.dataset.action) {
       case 'favorite':
+        if (!state.admin) {
+          toggleLocalFavorite(id);
+          render();
+          return;
+        }
         await patch(`/api/opportunities/${id}`, { favorite: item.favorite ? 0 : 1 });
         break;
       case 'applied':
