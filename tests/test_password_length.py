@@ -1,6 +1,8 @@
 """Regression: a valid seven-character password must boot and authenticate."""
+
 import pytest
 from fastapi.testclient import TestClient
+
 from app import auth
 from app.main import app
 
@@ -19,13 +21,14 @@ def test_seven_character_password_accepted(monkeypatch):
 def test_invalid_password_setting_refuses_startup(monkeypatch, password):
     monkeypatch.setenv('RADAR_PASSWORD', password)
     assert not auth.password_configured()
-    with pytest.raises(RuntimeError, match='pelo menos 7 caracteres|sem valor de exemplo'):
+    with pytest.raises(RuntimeError, match=r'pelo menos 7 caracteres|sem valor de exemplo'):
         with TestClient(app):
             pass
 
 
 def test_form_minlength_matches_backend():
     from pathlib import Path
+
     html = (Path(__file__).resolve().parent.parent / 'static' / 'index.html').read_text()
     assert 'minlength="7"' in html
     assert 'minlength="12"' not in html

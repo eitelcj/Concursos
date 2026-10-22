@@ -1,12 +1,12 @@
 """SQLite persistence, known official notices and transparent status calculations."""
+
 import hashlib
-import json
 import os
 import re
 import sqlite3
 import threading
 import unicodedata
-from datetime import datetime, date, timedelta
+from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -14,12 +14,36 @@ TZ = ZoneInfo('America/Sao_Paulo')
 DB_PATH = os.getenv('RADAR_DB', '/data/radar.sqlite3')
 DB_LOCK = threading.RLock()
 
-FIELDS = ('title', 'agency', 'position', 'salary_min', 'salary_max', 'registration_start',
-          'registration_end', 'exam_date', 'exam_cities', 'work_cities', 'state',
-          'official_url', 'apply_url', 'notice_url', 'discovery_url', 'source',
-          'confidence', 'reviewed', 'notes', 'exam_in_sp', 'work_in_sp',
-          'national', 'favorite', 'applied', 'dismissed', 'status_override',
-          'type', 'observed_at')
+FIELDS = (
+    'title',
+    'agency',
+    'position',
+    'salary_min',
+    'salary_max',
+    'registration_start',
+    'registration_end',
+    'exam_date',
+    'exam_cities',
+    'work_cities',
+    'state',
+    'official_url',
+    'apply_url',
+    'notice_url',
+    'discovery_url',
+    'source',
+    'confidence',
+    'reviewed',
+    'notes',
+    'exam_in_sp',
+    'work_in_sp',
+    'national',
+    'favorite',
+    'applied',
+    'dismissed',
+    'status_override',
+    'type',
+    'observed_at',
+)
 DATE_FIELDS = ('registration_start', 'registration_end', 'exam_date')
 URL_FIELDS = ('official_url', 'apply_url', 'notice_url', 'discovery_url')
 
@@ -38,12 +62,31 @@ def ascii_fold(v):
 
 def is_it(text):
     t = ascii_fold(text)
-    words = ('tecnologia da informacao', 'informatica', 'desenvolvimento de sistemas',
-             'desenvolvedor', 'programador', 'analista de sistemas', 'engenharia de software',
-             'software', 'seguranca da informacao', 'ciencia de dados', 'cientista de dados',
-             'infraestrutura de ti', 'governanca de ti', 'analista de ti', 'tecnico de ti',
-             'redes de computadores', 'banco de dados', 'computacao', 'suporte tecnico',
-             'sistemas da informacao', 'cybersecurity', 'data engineer', 'sistemas de informacao')
+    words = (
+        'tecnologia da informacao',
+        'informatica',
+        'desenvolvimento de sistemas',
+        'desenvolvedor',
+        'programador',
+        'analista de sistemas',
+        'engenharia de software',
+        'software',
+        'seguranca da informacao',
+        'ciencia de dados',
+        'cientista de dados',
+        'infraestrutura de ti',
+        'governanca de ti',
+        'analista de ti',
+        'tecnico de ti',
+        'redes de computadores',
+        'banco de dados',
+        'computacao',
+        'suporte tecnico',
+        'sistemas da informacao',
+        'cybersecurity',
+        'data engineer',
+        'sistemas de informacao',
+    )
     return any(w in t for w in words) or bool(re.search(r'\bti\b', t))
 
 
@@ -65,7 +108,7 @@ def connection():
 
 def init_db():
     with DB_LOCK, connection() as db:
-        db.executescript('''
+        db.executescript("""
           PRAGMA journal_mode=WAL;
           CREATE TABLE IF NOT EXISTS opportunities (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -128,7 +171,7 @@ def init_db():
             created_at TEXT NOT NULL, notified INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY(opportunity_id) REFERENCES opportunities(id)
           );
-        ''')
+        """)
         db.commit()
 
 
@@ -140,7 +183,7 @@ def validate(data, partial=False):
             try:
                 date.fromisoformat(data[k])
             except (ValueError, TypeError):
-                raise ValueError(f'{k} deve estar no formato YYYY-MM-DD')
+                raise ValueError(f'{k} deve estar no formato YYYY-MM-DD') from None
     for k in URL_FIELDS:
         if data.get(k) and not str(data[k]).startswith(('https://', 'http://')):
             raise ValueError(f'{k} deve começar por https:// ou http://')
@@ -156,7 +199,9 @@ def validate(data, partial=False):
 def upsert(data, *, enrich_only=True):
     """New discoveries never overwrite already reviewed details or verified dates."""
     validate(data)
-    fp = data.get('fingerprint') or fingerprint(data['title'], data.get('agency', ''), data.get('position', ''), data.get('official_url', ''))
+    fp = data.get('fingerprint') or fingerprint(
+        data['title'], data.get('agency', ''), data.get('position', ''), data.get('official_url', '')
+    )
     stamp = now()
     with DB_LOCK, connection() as db:
         previous = db.execute('SELECT * FROM opportunities WHERE fingerprint=?', (fp,)).fetchone()
@@ -170,14 +215,19 @@ def upsert(data, *, enrich_only=True):
             if payload:
                 payload['updated_at'] = stamp
             keys = list(payload)
-            db.execute(f"UPDATE opportunities SET {', '.join(k+'=?' for k in keys)} WHERE fingerprint=?",
-                       [payload[k] for k in keys] + [fp])
+            db.execute(
+                f'UPDATE opportunities SET {", ".join(k + "=?" for k in keys)} WHERE fingerprint=?',
+                [payload[k] for k in keys] + [fp],
+            )
             db.commit()
             return previous['id'], False
         values = {k: data[k] for k in FIELDS if k in data}
         values.update(fingerprint=fp, created_at=stamp, updated_at=stamp, last_seen=stamp)
         keys = list(values)
-        cur = db.execute(f"INSERT INTO opportunities ({', '.join(keys)}) VALUES ({', '.join('?' for _ in keys)})", list(values.values()))
+        cur = db.execute(
+            f'INSERT INTO opportunities ({", ".join(keys)}) VALUES ({", ".join("?" for _ in keys)})',
+            list(values.values()),
+        )
         db.commit()
         return cur.lastrowid, True
 
@@ -213,11 +263,18 @@ def compute_status(item, reference=None):
 def present(item, reference=None):
     reference = reference or today()
     item['status'] = compute_status(item, reference)
-    item['days_left'] = ((date.fromisoformat(item['registration_end']) - reference).days
-                         if item.get('registration_end') and item['status'] in ('open', 'upcoming') else None)
+    item['days_left'] = (
+        (date.fromisoformat(item['registration_end']) - reference).days
+        if item.get('registration_end') and item['status'] in ('open', 'upcoming')
+        else None
+    )
     item['eligible_sp'] = bool(item.get('exam_in_sp') or item.get('work_in_sp'))
-    item['salary_highlight'] = bool(item.get('salary_verified')) and max(item.get('salary_max') or 0, item.get('salary_min') or 0) >= 7000
-    item['priority'] = (3 if item['status'] == 'open' else 2 if item['status'] == 'upcoming' else 1 if item['status'] == 'verify' else 0)
+    item['salary_highlight'] = (
+        bool(item.get('salary_verified')) and max(item.get('salary_max') or 0, item.get('salary_min') or 0) >= 7000
+    )
+    item['priority'] = (
+        3 if item['status'] == 'open' else 2 if item['status'] == 'upcoming' else 1 if item['status'] == 'verify' else 0
+    )
     return item
 
 
@@ -225,29 +282,56 @@ def query_opportunities(include_dismissed=True):
     with connection() as db:
         rows = db.execute('SELECT * FROM opportunities').fetchall()
     result = [present(attach_proof(dict(r))) for r in rows if include_dismissed or not r['dismissed']]
-    return sorted(result, key=lambda r: (-int(r['favorite']), -r['priority'],
-                                        r['days_left'] if r['days_left'] is not None else 9999,
-                                        -int(r['salary_highlight']), -r['id']))
+    return sorted(
+        result,
+        key=lambda r: (
+            -int(r['favorite']),
+            -r['priority'],
+            r['days_left'] if r['days_left'] is not None else 9999,
+            -int(r['salary_highlight']),
+            -r['id'],
+        ),
+    )
 
 
 def update_opportunity(oid, payload):
     # Any edits to evidence-bearing facts revoke the proof instead of keeping a false 'confirmed' badge.
-    restricted = {'confidence','reviewed','status_override','official_url','notice_url','apply_url','registration_start',
-                  'registration_end','exam_date','position','salary_min','salary_max','exam_cities','work_cities',
-                  'exam_in_sp','work_in_sp','national'}
-    filtered = {k: v for k, v in payload.items() if k in FIELDS and k not in ('confidence','reviewed')}
+    restricted = {
+        'confidence',
+        'reviewed',
+        'status_override',
+        'official_url',
+        'notice_url',
+        'apply_url',
+        'registration_start',
+        'registration_end',
+        'exam_date',
+        'position',
+        'salary_min',
+        'salary_max',
+        'exam_cities',
+        'work_cities',
+        'exam_in_sp',
+        'work_in_sp',
+        'national',
+    }
+    filtered = {k: v for k, v in payload.items() if k in FIELDS and k not in ('confidence', 'reviewed')}
     if not filtered:
         raise ValueError('Nenhum campo válido')
     validate(filtered, partial=True)
     with DB_LOCK, connection() as db:
-        existing=db.execute('SELECT * FROM opportunities WHERE id=?',(oid,)).fetchone()
-        if not existing:return False
-        revoke=any(k in restricted and filtered[k]!=existing[k] for k in filtered)
+        existing = db.execute('SELECT * FROM opportunities WHERE id=?', (oid,)).fetchone()
+        if not existing:
+            return False
+        revoke = any(k in restricted and filtered[k] != existing[k] for k in filtered)
         filtered['updated_at'] = now()
-        db.execute(f"UPDATE opportunities SET {', '.join(k+'=?' for k in filtered)} WHERE id=?", list(filtered.values())+[oid])
+        db.execute(
+            f'UPDATE opportunities SET {", ".join(k + "=?" for k in filtered)} WHERE id=?',
+            list(filtered.values()) + [oid],
+        )
         if revoke:
-            db.execute('DELETE FROM notice_evidence WHERE opportunity_id=?',(oid,))
-            db.execute("UPDATE opportunities SET reviewed=0,confidence='discovery' WHERE id=?",(oid,))
+            db.execute('DELETE FROM notice_evidence WHERE opportunity_id=?', (oid,))
+            db.execute("UPDATE opportunities SET reviewed=0,confidence='discovery' WHERE id=?", (oid,))
         db.commit()
     return True
 
@@ -261,21 +345,27 @@ def scan_start(source):
 
 def scan_finish(run_id, found=0, added=0, error='', state=None):
     with DB_LOCK, connection() as db:
-        db.execute('UPDATE scan_runs SET finished_at=?, found=?, added=?, error=?, state=? WHERE id=?',
-                   (now(), found, added, error[:1200], state or ('failed' if error else 'ok'), run_id))
+        db.execute(
+            'UPDATE scan_runs SET finished_at=?, found=?, added=?, error=?, state=? WHERE id=?',
+            (now(), found, added, error[:1200], state or ('failed' if error else 'ok'), run_id),
+        )
         db.commit()
 
 
 def source_health():
     with connection() as db:
-        rows = db.execute('SELECT s.* FROM scan_runs s JOIN (SELECT source, MAX(id) AS id FROM scan_runs GROUP BY source) l ON s.id=l.id ORDER BY s.source').fetchall()
+        rows = db.execute(
+            'SELECT s.* FROM scan_runs s JOIN (SELECT source, MAX(id) AS id FROM scan_runs GROUP BY source) l ON s.id=l.id ORDER BY s.source'
+        ).fetchall()
         return [dict(r) for r in rows]
 
 
 def add_alert(key, kind, msg, oid=None):
     with DB_LOCK, connection() as db:
-        cur = db.execute('INSERT OR IGNORE INTO alerts (unique_key,kind,text,opportunity_id,created_at) VALUES (?,?,?,?,?)',
-                         (key,kind,msg,oid,now()))
+        cur = db.execute(
+            'INSERT OR IGNORE INTO alerts (unique_key,kind,text,opportunity_id,created_at) VALUES (?,?,?,?,?)',
+            (key, kind, msg, oid, now()),
+        )
         db.commit()
         return bool(cur.rowcount)
 
@@ -290,80 +380,144 @@ def seed_official():
     Never clobber user edits on restarts. Exam date IFSP deliberately unset without primary confirmation.
     """
     seeds = [
-        dict(title='CGU 2026 — Auditor TI · Desenvolvimento de Sistemas', agency='Controladoria-Geral da União (CGU)',
-             position='Auditor Federal de Finanças e Controle — TI / Desenvolvimento de Sistemas',
-             salary_min=20000.0, salary_max=20000.0, registration_start='2026-10-10', registration_end='2026-11-04',
-             exam_date='2026-12-13', exam_cities='São Paulo/SP e demais capitais', work_cities='Brasília/DF',
-             state='DF', exam_in_sp=1, work_in_sp=0, national=1, reviewed=1,
-             official_url='https://www.gov.br/cgu/pt-br/assuntos/noticias/2026/defeso-eleitoral/cgu-publica-edital-de-concurso-para-60-vagas-de-auditor-federal-de-financas-e-controle',
-             apply_url='https://www.cebraspe.org.br/concursos/CGU_26_AFFC',
-             notice_url='https://www.gov.br/cgu/pt-br/acesso-a-informacao/concursos',
-             source='CGU / Cebraspe (fonte oficial)', confidence='official',
-             notes='10 vagas em Desenvolvimento de Sistemas; outras 20 em Ciência de Dados e Infraestrutura. Prova em todas as capitais. Inscrição R$ 170; conferir retificações.'),
-        dict(title='CGU 2026 — Auditor TI · Ciência de Dados', agency='Controladoria-Geral da União (CGU)',
-             position='Auditor Federal de Finanças e Controle — TI / Ciência de Dados',
-             salary_min=20000.0, salary_max=20000.0, registration_start='2026-10-10', registration_end='2026-11-04',
-             exam_date='2026-12-13', exam_cities='São Paulo/SP e demais capitais', work_cities='Brasília/DF',
-             state='DF', exam_in_sp=1, work_in_sp=0, national=1, reviewed=1,
-             official_url='https://www.gov.br/cgu/pt-br/assuntos/noticias/2026/defeso-eleitoral/cgu-publica-edital-de-concurso-para-60-vagas-de-auditor-federal-de-financas-e-controle',
-             apply_url='https://www.cebraspe.org.br/concursos/CGU_26_AFFC',
-             source='CGU / Cebraspe (fonte oficial)',confidence='official',
-             notes='10 vagas em Ciência de Dados; lotação em Brasília; confirmar pré-requisitos no edital.'),
-        dict(title='CGU 2026 — Auditor TI · Infraestrutura', agency='Controladoria-Geral da União (CGU)',
-             position='Auditor Federal de Finanças e Controle — TI / Infraestrutura de TI',
-             salary_min=20000.0, salary_max=20000.0, registration_start='2026-10-10', registration_end='2026-11-04',
-             exam_date='2026-12-13', exam_cities='São Paulo/SP e demais capitais', work_cities='Brasília/DF',
-             state='DF', exam_in_sp=1, work_in_sp=0, national=1, reviewed=1,
-             official_url='https://www.gov.br/cgu/pt-br/assuntos/noticias/2026/defeso-eleitoral/cgu-publica-edital-de-concurso-para-60-vagas-de-auditor-federal-de-financas-e-controle',
-             apply_url='https://www.cebraspe.org.br/concursos/CGU_26_AFFC',
-             source='CGU / Cebraspe (fonte oficial)', confidence='official',
-             notes='10 vagas em Infraestrutura de TI; lotação em Brasília.'),
-        dict(title='IFSP 183/2026 — Professor de Informática (Campus São Paulo)',
-             agency='Instituto Federal de São Paulo (IFSP)',position='Professor EBTT — Informática',
-             salary_min=6397.19, salary_max=7356.77,registration_end='2026-11-17',
-             exam_cities='Ver edital/convocação', work_cities='São Paulo/SP',state='SP',exam_in_sp=0,work_in_sp=1,
-             national=0, reviewed=1, confidence='official',
-             status_override='open',
-             official_url='https://spo.ifsp.edu.br/destaques/4723-edital-ifsp-%E2%80%94-concurso-p%C3%BAblico-para-contrata%C3%A7%C3%A3o-de-professores',
-             apply_url='https://concursopublico.ifsp.edu.br/editais/edital-1832026-docentes',
-             source='IFSP (fonte oficial)',notes='Prazo até 17/11/2026 confirmado. Salário-base de acordo com página oficial, antes de adicionais/titulação. Início de inscrição e cidade exata da prova exigem checagem no edital. Site oficial confirma que as inscrições estão abertas; a marcação é válida apenas até o prazo de encerramento.')
+        {
+            'title': 'CGU 2026 — Auditor TI · Desenvolvimento de Sistemas',
+            'agency': 'Controladoria-Geral da União (CGU)',
+            'position': 'Auditor Federal de Finanças e Controle — TI / Desenvolvimento de Sistemas',
+            'salary_min': 20000.0,
+            'salary_max': 20000.0,
+            'registration_start': '2026-10-10',
+            'registration_end': '2026-11-04',
+            'exam_date': '2026-12-13',
+            'exam_cities': 'São Paulo/SP e demais capitais',
+            'work_cities': 'Brasília/DF',
+            'state': 'DF',
+            'exam_in_sp': 1,
+            'work_in_sp': 0,
+            'national': 1,
+            'reviewed': 1,
+            'official_url': 'https://www.gov.br/cgu/pt-br/assuntos/noticias/2026/defeso-eleitoral/cgu-publica-edital-de-concurso-para-60-vagas-de-auditor-federal-de-financas-e-controle',
+            'apply_url': 'https://www.cebraspe.org.br/concursos/CGU_26_AFFC',
+            'notice_url': 'https://www.gov.br/cgu/pt-br/acesso-a-informacao/concursos',
+            'source': 'CGU / Cebraspe (fonte oficial)',
+            'confidence': 'official',
+            'notes': '10 vagas em Desenvolvimento de Sistemas; outras 20 em Ciência de Dados e Infraestrutura. Prova em todas as capitais. Inscrição R$ 170; conferir retificações.',
+        },
+        {
+            'title': 'CGU 2026 — Auditor TI · Ciência de Dados',
+            'agency': 'Controladoria-Geral da União (CGU)',
+            'position': 'Auditor Federal de Finanças e Controle — TI / Ciência de Dados',
+            'salary_min': 20000.0,
+            'salary_max': 20000.0,
+            'registration_start': '2026-10-10',
+            'registration_end': '2026-11-04',
+            'exam_date': '2026-12-13',
+            'exam_cities': 'São Paulo/SP e demais capitais',
+            'work_cities': 'Brasília/DF',
+            'state': 'DF',
+            'exam_in_sp': 1,
+            'work_in_sp': 0,
+            'national': 1,
+            'reviewed': 1,
+            'official_url': 'https://www.gov.br/cgu/pt-br/assuntos/noticias/2026/defeso-eleitoral/cgu-publica-edital-de-concurso-para-60-vagas-de-auditor-federal-de-financas-e-controle',
+            'apply_url': 'https://www.cebraspe.org.br/concursos/CGU_26_AFFC',
+            'source': 'CGU / Cebraspe (fonte oficial)',
+            'confidence': 'official',
+            'notes': '10 vagas em Ciência de Dados; lotação em Brasília; confirmar pré-requisitos no edital.',
+        },
+        {
+            'title': 'CGU 2026 — Auditor TI · Infraestrutura',
+            'agency': 'Controladoria-Geral da União (CGU)',
+            'position': 'Auditor Federal de Finanças e Controle — TI / Infraestrutura de TI',
+            'salary_min': 20000.0,
+            'salary_max': 20000.0,
+            'registration_start': '2026-10-10',
+            'registration_end': '2026-11-04',
+            'exam_date': '2026-12-13',
+            'exam_cities': 'São Paulo/SP e demais capitais',
+            'work_cities': 'Brasília/DF',
+            'state': 'DF',
+            'exam_in_sp': 1,
+            'work_in_sp': 0,
+            'national': 1,
+            'reviewed': 1,
+            'official_url': 'https://www.gov.br/cgu/pt-br/assuntos/noticias/2026/defeso-eleitoral/cgu-publica-edital-de-concurso-para-60-vagas-de-auditor-federal-de-financas-e-controle',
+            'apply_url': 'https://www.cebraspe.org.br/concursos/CGU_26_AFFC',
+            'source': 'CGU / Cebraspe (fonte oficial)',
+            'confidence': 'official',
+            'notes': '10 vagas em Infraestrutura de TI; lotação em Brasília.',
+        },
+        {
+            'title': 'IFSP 183/2026 — Professor de Informática (Campus São Paulo)',
+            'agency': 'Instituto Federal de São Paulo (IFSP)',
+            'position': 'Professor EBTT — Informática',
+            'salary_min': 6397.19,
+            'salary_max': 7356.77,
+            'registration_end': '2026-11-17',
+            'exam_cities': 'Ver edital/convocação',
+            'work_cities': 'São Paulo/SP',
+            'state': 'SP',
+            'exam_in_sp': 0,
+            'work_in_sp': 1,
+            'national': 0,
+            'reviewed': 1,
+            'confidence': 'official',
+            'status_override': 'open',
+            'official_url': 'https://spo.ifsp.edu.br/destaques/4723-edital-ifsp-%E2%80%94-concurso-p%C3%BAblico-para-contrata%C3%A7%C3%A3o-de-professores',
+            'apply_url': 'https://concursopublico.ifsp.edu.br/editais/edital-1832026-docentes',
+            'source': 'IFSP (fonte oficial)',
+            'notes': 'Prazo até 17/11/2026 confirmado. Salário-base de acordo com página oficial, antes de adicionais/titulação. Início de inscrição e cidade exata da prova exigem checagem no edital. Site oficial confirma que as inscrições estão abertas; a marcação é válida apenas até o prazo de encerramento.',
+        },
     ]
     for seed in seeds:
         # Distinguish different CGU specializations even though URL is identical.
-        seed['fingerprint'] = hashlib.sha256(f"official2026|{seed['title']}".encode()).hexdigest()[:32]
+        seed['fingerprint'] = hashlib.sha256(f'official2026|{seed["title"]}'.encode()).hexdigest()[:32]
         upsert(seed)
 
 
 def attach_proof(item):
     with connection() as db:
-        row=db.execute('SELECT * FROM notice_evidence WHERE opportunity_id=?',(item['id'],)).fetchone()
-    item['document_verified']=bool(row)
-    item['salary_verified']=bool(row and row['validated_salary'])
-    item['proof']={k:row[k] for k in ('notice_url','sha256','checked_at','role_excerpt','validated_dates')} if row else None
+        row = db.execute('SELECT * FROM notice_evidence WHERE opportunity_id=?', (item['id'],)).fetchone()
+    item['document_verified'] = bool(row)
+    item['salary_verified'] = bool(row and row['validated_salary'])
+    item['proof'] = (
+        {k: row[k] for k in ('notice_url', 'sha256', 'checked_at', 'role_excerpt', 'validated_dates')} if row else None
+    )
     return item
+
 
 def record_proof(oid, proof, details):
     # Only the dedicated verification endpoint may establish confirmed status.
-    with DB_LOCK,connection() as db:
-        old=db.execute('SELECT id FROM opportunities WHERE id=?',(oid,)).fetchone()
-        if old is None: raise ValueError('Concurso não encontrado')
-        dates=','.join(k for k in DATE_FIELDS if details.get(k))
-        salary=int(any(details.get(k) is not None for k in ('salary_min','salary_max')))
-        db.execute('''INSERT INTO notice_evidence(opportunity_id,notice_url,sha256,checked_at,role_excerpt,validated_dates,validated_salary)
+    with DB_LOCK, connection() as db:
+        old = db.execute('SELECT id FROM opportunities WHERE id=?', (oid,)).fetchone()
+        if old is None:
+            raise ValueError('Concurso não encontrado')
+        dates = ','.join(k for k in DATE_FIELDS if details.get(k))
+        salary = int(any(details.get(k) is not None for k in ('salary_min', 'salary_max')))
+        db.execute(
+            """INSERT INTO notice_evidence(opportunity_id,notice_url,sha256,checked_at,role_excerpt,validated_dates,validated_salary)
                      VALUES(?,?,?,?,?,?,?) ON CONFLICT(opportunity_id) DO UPDATE SET
                      notice_url=excluded.notice_url,sha256=excluded.sha256,checked_at=excluded.checked_at,
-                     role_excerpt=excluded.role_excerpt,validated_dates=excluded.validated_dates,validated_salary=excluded.validated_salary''',
-                  (oid,proof.url,proof.sha256,now(),proof.role_excerpt,dates,salary))
-        db.execute("UPDATE opportunities SET confidence='official',reviewed=1,notice_url=?,updated_at=?,status_override=CASE WHEN status_override='open' THEN NULL ELSE status_override END WHERE id=?",(proof.url,now(),oid))
+                     role_excerpt=excluded.role_excerpt,validated_dates=excluded.validated_dates,validated_salary=excluded.validated_salary""",
+            (oid, proof.url, proof.sha256, now(), proof.role_excerpt, dates, salary),
+        )
+        db.execute(
+            "UPDATE opportunities SET confidence='official',reviewed=1,notice_url=?,updated_at=?,status_override=CASE WHEN status_override='open' THEN NULL ELSE status_override END WHERE id=?",
+            (proof.url, now(), oid),
+        )
         db.commit()
 
+
 def upsert_candidate(url, source, title, notice_url='', state='pending', detail=''):
-    with DB_LOCK,connection() as db:
-        db.execute('''INSERT INTO scan_candidates(url,source,title,notice_url,state,detail,first_seen,last_seen)
+    with DB_LOCK, connection() as db:
+        db.execute(
+            """INSERT INTO scan_candidates(url,source,title,notice_url,state,detail,first_seen,last_seen)
            VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(url) DO UPDATE SET notice_url=excluded.notice_url,
-           state=excluded.state, detail=excluded.detail, last_seen=excluded.last_seen''',
-           (url,source,title[:240],notice_url,state,detail[:500],now(),now()))
+           state=excluded.state, detail=excluded.detail, last_seen=excluded.last_seen""",
+            (url, source, title[:240], notice_url, state, detail[:500], now(), now()),
+        )
         db.commit()
+
 
 def candidates():
     with connection() as db:
