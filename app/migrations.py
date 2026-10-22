@@ -69,6 +69,25 @@ V2_SCHEMA = """
           );
         """
 
+ACCOUNT_SECURITY = """
+CREATE TABLE IF NOT EXISTS admin_sessions (
+  id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, csrf_hash TEXT NOT NULL,
+  ip TEXT NOT NULL DEFAULT '', user_agent TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, expires_at TEXT NOT NULL, revoked_at TEXT
+);
+CREATE TABLE IF NOT EXISTS trusted_devices (
+  id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, ip TEXT NOT NULL DEFAULT '',
+  user_agent TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, expires_at TEXT NOT NULL, revoked_at TEXT
+);
+CREATE TABLE IF NOT EXISTS security_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, ip TEXT NOT NULL DEFAULT '',
+  type TEXT NOT NULL, detail TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_security_events_at ON security_events(at);
+DROP TABLE IF EXISTS auth_sessions;
+"""
+
 MIGRATIONS = [
     (1, 'v2 schema', V2_SCHEMA),
+    (2, 'account security: sessions with devices, trusted devices, security events', ACCOUNT_SECURITY),
 ]

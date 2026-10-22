@@ -36,6 +36,7 @@ async def lifespan(app):
         raise RuntimeError(
             f'Defina RADAR_PASSWORD com pelo menos {auth.MIN_PASSWORD_LENGTH} caracteres no .env (sem valor de exemplo)'
         )
+    auth.bootstrap_password()
     seeds.seed_official()  # v1.1 retained; NEW documentary gate requires reconfirmation.
     collectors.deadline_alerts()
     yield
@@ -166,33 +167,46 @@ def status(request: Request):
     }
 
 
+def request_ip(request):
+    peer = request.client.host if request.client else ''
+    return auth.client_ip(peer, request.headers.get('x-forwarded-for', ''))
+
+
+def session_cookie_args(max_age):
+    return {'httponly': True, 'samesite': 'strict', 'secure': config.cookie_secure(), 'path': '/', 'max_age': max_age}
+
+
 @app.post('/api/auth/login')
 async def login(request: Request):
     data = await request.json()
     password = str(data.get('password', ''))
-    code = str(data.get('code', ''))
-    ip = request.client.host if request.client else 'unknown'
+    code = str(data.get('code', '')).strip()
+    remember = data.get('remember') is True
+    ip = request_ip(request)
+    agent = request.headers.get('user-agent', '')
     if not auth.can_attempt(ip):
         raise HTTPException(429, 'Muitas tentativas. Aguarde 15 minutos.')
     if not auth.password_ok(password):
         auth.failed(ip)
         raise HTTPException(401, 'Senha inválida')
-    if auth.mfa_enabled() and not code:
-        return {'mfa_required': True}
-    if auth.mfa_enabled() and not auth.mfa_check(code, True):
-        auth.failed(ip)
-        raise HTTPException(401, 'Código MFA inválido')
+    trusted = auth.device_trusted(request.cookies.get(auth.TRUSTED_COOKIE))
+    if auth.mfa_enabled() and not trusted:
+        if not code:
+            return {'mfa_required': True}
+        if not auth.mfa_check(code, True):
+            auth.failed(ip)
+            raise HTTPException(401, 'Código MFA inválido')
     auth.successful(ip)
-    token, csrf = auth.new_session()
+    token, csrf = auth.new_session(ip, agent, remember)
     response = JSONResponse({'authenticated': True, 'mfa_enabled': auth.mfa_enabled(), 'csrf': csrf})
-    secure = config.cookie_secure()
-    response.set_cookie(
-        auth.COOKIE, token, max_age=7 * 86400, httponly=True, samesite='strict', secure=secure, path='/'
-    )
-    # Only accessible to same-origin JS. CSRF cookie is NOT an authentication credential.
-    response.set_cookie(
-        'radar_csrf', csrf, max_age=7 * 86400, httponly=False, samesite='strict', secure=secure, path='/'
-    )
+    max_age = auth.REMEMBER_DAYS * 86400 if remember else None
+    response.set_cookie(auth.COOKIE, token, **session_cookie_args(max_age))
+    # Readable by same-origin JS only; the CSRF token is not an authentication credential.
+    response.set_cookie('radar_csrf', csrf, **{**session_cookie_args(max_age), 'httponly': False})
+    if remember and auth.mfa_enabled() and not trusted:
+        response.set_cookie(
+            auth.TRUSTED_COOKIE, auth.trust_device(ip, agent), **session_cookie_args(auth.REMEMBER_DAYS * 86400)
+        )
     return response
 
 
@@ -203,6 +217,51 @@ def logout(request: Request):
     response.delete_cookie(auth.COOKIE, path='/')
     response.delete_cookie('radar_csrf', path='/')
     return response
+
+
+@app.get('/api/auth/sessions')
+def sessions(request: Request):
+    return {
+        'sessions': auth.list_sessions(request.state.session['id']),
+        'trusted_devices': auth.trusted_device_count(),
+        'events': auth.recent_events(),
+    }
+
+
+@app.post('/api/auth/sessions/revoke')
+async def revoke_session(request: Request):
+    data = await request.json()
+    try:
+        ok = auth.revoke_session(str(data.get('id', '')), request.state.session['id'], request_ip(request))
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    if not ok:
+        raise HTTPException(404, 'Sessão não encontrada')
+    return {'ok': True}
+
+
+@app.post('/api/auth/sessions/revoke-others')
+def revoke_others(request: Request):
+    return {'revoked': auth.revoke_other_sessions(request.state.session['id'], request_ip(request))}
+
+
+@app.post('/api/auth/trusted-devices/revoke')
+def revoke_trusted(request: Request):
+    return {'revoked': auth.revoke_trusted_devices(request_ip(request))}
+
+
+@app.post('/api/auth/password')
+async def change_password(request: Request):
+    data = await request.json()
+    try:
+        auth.change_password(str(data.get('current', '')), str(data.get('new', '')), str(data.get('code', '')))
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    ip = request_ip(request)
+    auth.revoke_other_sessions(request.state.session['id'], ip)
+    auth.revoke_trusted_devices(ip)
+    auth.event(ip, 'password_changed')
+    return {'ok': True}
 
 
 @app.post('/api/auth/mfa/setup')

@@ -43,6 +43,11 @@ def public_mode():
     return os.getenv('RADAR_PUBLIC', '1') != '0'
 
 
+def trusted_proxies():
+    """Comma-separated IPs/CIDRs of reverse proxies whose X-Forwarded-For is trusted (e.g. 172.16.0.0/12)."""
+    return [item.strip() for item in os.getenv('RADAR_TRUSTED_PROXIES', '').split(',') if item.strip()]
+
+
 def cookie_secure():
     return os.getenv('RADAR_COOKIE_SECURE', '1') == '1'
 
