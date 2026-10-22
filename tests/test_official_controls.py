@@ -2,7 +2,8 @@
 
 import hashlib
 
-from app import collectors, core, evidence
+from app import collectors, evidence
+from app import repository as repo
 
 
 def test_retifications_never_chosen_as_initial_notice():
@@ -38,7 +39,7 @@ def test_two_ibam_edital_documents_are_separate(monkeypatch):
     s = collectors.Source('IBAM — editais', 'https://www.ibam-concursos.org.br/', 'notice_index')
     found, added, ok = collectors.scan_source(s)
     assert (found, added, ok) == (2, 2, True)
-    items = core.query_opportunities()
+    items = repo.query_opportunities()
     assert len(items) == 2
     assert len({i['fingerprint'] for i in items}) == 2
     assert all(i['status'] == 'verify' and not i['document_verified'] for i in items)
@@ -50,4 +51,4 @@ def test_list_without_readable_opening_notice_is_not_ok(monkeypatch):
     s = collectors.Source('Vunesp — próximos', 'https://www.vunesp.com.br/busca/concurso/proximo')
     found, added, ok = collectors.scan_source(s)
     assert not ok and found == 0 and added == 0
-    assert 'PARCIAL' in core.source_health()[0]['error']
+    assert 'PARCIAL' in repo.source_health()[0]['error']

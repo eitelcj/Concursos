@@ -7,7 +7,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app import collectors, core, evidence, polite
+from app import collectors, database, evidence, polite
+from app import repository as repo
 
 
 class Response:
@@ -58,7 +59,7 @@ def test_429_retry_after_and_default_wait():
     now = time.time()
     with pytest.raises(polite.DomainCoolingDown):
         raise polite.reject('www.vunesp.com.br', 429, '7200', now=now)
-    with core.connection() as db:
+    with database.connection() as db:
         row = db.execute('SELECT blocked_until FROM host_pacing WHERE host=?', ('www.vunesp.com.br',)).fetchone()
     assert row['blocked_until'] - now == pytest.approx(7200, abs=1)
     assert (
@@ -68,7 +69,7 @@ def test_429_retry_after_and_default_wait():
         == 3600
     )
     polite.reject('www.fgv.br', 429, None, now=now)
-    with core.connection() as db:
+    with database.connection() as db:
         row2 = db.execute('SELECT blocked_until FROM host_pacing WHERE host=?', ('www.fgv.br',)).fetchone()
     assert row2['blocked_until'] - now == pytest.approx(3 * 3600, abs=1)
 
@@ -118,7 +119,7 @@ def test_source_blocked_is_not_reported_as_success(monkeypatch):
 
     monkeypatch.setattr(evidence, 'fetch_official', blocked)
     assert collectors.scan_source(collectors.SOURCES[0]) == (0, 0, False)
-    assert core.source_health()[0]['state'] == 'blocked'
+    assert repo.source_health()[0]['state'] == 'blocked'
 
 
 def test_navigation_brand_and_mobile_rules():

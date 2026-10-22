@@ -1,38 +1,39 @@
 """Optional outbound email and Telegram digest. Never requires paid services."""
 
-import os
 import smtplib
 from email.message import EmailMessage
 
 import requests
 
-from . import core
+from . import config, database
 
 
 def dispatch():
-    with core.connection() as db:
+    with database.connection() as db:
         pending = [dict(r) for r in db.execute('SELECT * FROM alerts WHERE notified=0 ORDER BY id LIMIT 100')]
     if not pending:
         return {'sent': 0, 'reason': 'no pending events'}
     lines = [f'• {a["text"]}' for a in pending]
     body = 'SpeedLora Concurso Radar — alertas pendentes\n\n' + '\n\n'.join(lines)
     sent_to = []
-    host, sender, to = (os.getenv(k, '') for k in ('SMTP_HOST', 'ALERT_EMAIL_FROM', 'ALERT_EMAIL_TO'))
+    mail = config.smtp()
+    host, sender, to = mail['host'], mail['sender'], mail['to']
     if host and sender and to:
         msg = EmailMessage()
         msg['Subject'] = f'[Concurso Radar] {len(pending)} aviso(s) de concurso'
         msg['From'] = sender
         msg['To'] = to
         msg.set_content(body)
-        port = int(os.getenv('SMTP_PORT', '587'))
+        port = mail['port']
         with smtplib.SMTP_SSL(host, port, timeout=20) if port == 465 else smtplib.SMTP(host, port, timeout=20) as smtp:
-            if port != 465 and os.getenv('SMTP_STARTTLS', '1') == '1':
+            if port != 465 and mail['starttls']:
                 smtp.starttls()
-            if os.getenv('SMTP_USERNAME'):
-                smtp.login(os.getenv('SMTP_USERNAME'), os.getenv('SMTP_PASSWORD', ''))
+            if mail['username']:
+                smtp.login(mail['username'], mail['password'])
             smtp.send_message(msg)
         sent_to.append('email')
-    token, chat = os.getenv('TELEGRAM_BOT_TOKEN', ''), os.getenv('TELEGRAM_CHAT_ID', '')
+    tg = config.telegram()
+    token, chat = tg['token'], tg['chat_id']
     if token and chat:
         msg = '🔔 Concurso Radar\n\n' + '\n\n'.join(lines)
         # Telegram API text limit 4096; transmit chunks preserving boundaries.
@@ -45,7 +46,7 @@ def dispatch():
             resp.raise_for_status()
         sent_to.append('telegram')
     if sent_to:
-        with core.DB_LOCK, core.connection() as db:
+        with database.DB_LOCK, database.connection() as db:
             db.executemany('UPDATE alerts SET notified=1 WHERE id=?', [(a['id'],) for a in pending])
             db.commit()
     return {'sent': len(pending) if sent_to else 0, 'channels': sent_to}

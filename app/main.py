@@ -2,7 +2,6 @@
 
 import csv
 import io
-import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlparse
@@ -11,19 +10,32 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 
-from . import __version__, auth, collectors, core, evidence, polite
+from . import (
+    __version__,
+    auth,
+    clock,
+    collectors,
+    config,
+    database,
+    evidence,
+    kv,
+    polite,
+    seeds,
+    textnorm,
+)
+from . import repository as repo
 
 BASE = Path(__file__).resolve().parent.parent
 
 
 @asynccontextmanager
 async def lifespan(app):
-    core.init_db()
+    database.init_db()
     if not auth.password_configured():
         raise RuntimeError(
             f'Defina RADAR_PASSWORD com pelo menos {auth.MIN_PASSWORD_LENGTH} caracteres no .env (sem valor de exemplo)'
         )
-    core.seed_official()  # v1.1 retained; NEW documentary gate requires reconfirmation.
+    seeds.seed_official()  # v1.1 retained; NEW documentary gate requires reconfirmation.
     collectors.deadline_alerts()
     yield
 
@@ -85,7 +97,7 @@ async def gate(request: Request, call_next):
 
 @app.get('/healthz')
 def health():
-    return {'service': 'ok', 'date': core.today().isoformat()}
+    return {'service': 'ok', 'date': clock.today().isoformat()}
 
 
 @app.get('/')
@@ -135,7 +147,7 @@ async def login(request: Request):
     auth.successful(ip)
     token, csrf = auth.new_session()
     response = JSONResponse({'authenticated': True, 'mfa_enabled': auth.mfa_enabled(), 'csrf': csrf})
-    secure = os.getenv('RADAR_COOKIE_SECURE', '1') == '1'
+    secure = config.cookie_secure()
     response.set_cookie(
         auth.COOKIE, token, max_age=7 * 86400, httponly=True, samesite='strict', secure=secure, path='/'
     )
@@ -188,12 +200,12 @@ async def mfa_disable(request: Request):
 
 @app.get('/api/opportunities')
 def opportunities():
-    return {'items': core.query_opportunities(), 'as_of': core.now()}
+    return {'items': repo.query_opportunities(), 'as_of': clock.now()}
 
 
 @app.get('/api/opportunities/{oid}')
 def opportunity(oid: int):
-    item = core.fetch_one(oid)
+    item = repo.fetch_one(oid)
     if not item:
         raise HTTPException(404)
     return item
@@ -216,10 +228,10 @@ async def add_opportunity(request: Request):
     data['status_override'] = None
     data['source'] = 'Cadastro manual (verificação pendente)'
     try:
-        oid, _ = core.upsert(data, enrich_only=False)
+        oid, _ = repo.upsert(data, enrich_only=False)
     except (ValueError, TypeError) as e:
         raise HTTPException(422, str(e)) from e
-    return core.fetch_one(oid)
+    return repo.fetch_one(oid)
 
 
 @app.patch('/api/opportunities/{oid}')
@@ -231,48 +243,48 @@ async def edit_opportunity(oid: int, request: Request):
         if k in data and data[k] and not evidence.official_url(data[k]):
             raise HTTPException(422, f'{k} não é endereço oficial permitido')
     try:
-        ok = core.update_opportunity(oid, data)
+        ok = repo.update_opportunity(oid, data)
     except (ValueError, TypeError) as e:
         raise HTTPException(422, str(e)) from e
     if not ok:
         raise HTTPException(404)
-    return core.fetch_one(oid)
+    return repo.fetch_one(oid)
 
 
 @app.post('/api/opportunities/{oid}/verify')
 def verify(oid: int):
-    item = core.fetch_one(oid)
+    item = repo.fetch_one(oid)
     if not item:
         raise HTTPException(404)
     url = item.get('notice_url') or ''
     if not evidence.official_url(url):
         raise HTTPException(422, 'Informe link direto do edital oficial primeiro')
-    if not item.get('position') or not core.is_it(item['position']):
+    if not item.get('position') or not textnorm.is_it(item['position']):
         raise HTTPException(422, 'Informe o cargo de TI específico')
     try:
         proof = evidence.notice_proof(url, position=item['position'])
         evidence.check_assertions(proof, item)
-        core.record_proof(oid, proof, item)
+        repo.record_proof(oid, proof, item)
     except Exception as e:
         raise HTTPException(422, 'Conferência documental reprovada: ' + str(e)) from e
-    return core.fetch_one(oid)
+    return repo.fetch_one(oid)
 
 
 @app.get('/api/candidates')
 def candidates():
-    return {'items': core.candidates()}
+    return {'items': repo.candidates()}
 
 
 @app.get('/api/alerts')
 def alerts():
-    return {'items': core.get_alerts()}
+    return {'items': repo.get_alerts()}
 
 
 @app.get('/api/sources')
 def sources():
     host_state = polite.snapshot()
     return {
-        'health': core.source_health(),
+        'health': repo.source_health(),
         'cron': 'A cada 3 horas (00, 03, 06, 09, 12, 15, 18, 21 BRT)',
         'running': collectors.LOCK.locked(),
         'configured': len(collectors.SOURCES),
@@ -280,16 +292,13 @@ def sources():
             {'name': s.name, 'url': s.url, 'mode': s.mode, 'pacing': host_state.get(polite.hostname(s.url), {})}
             for s in collectors.SOURCES
         ],
-        'notifications_configured': bool(
-            (os.getenv('TELEGRAM_BOT_TOKEN') and os.getenv('TELEGRAM_CHAT_ID'))
-            or (os.getenv('SMTP_HOST') and os.getenv('ALERT_EMAIL_TO'))
-        ),
+        'notifications_configured': config.notifications_configured(),
     }
 
 
 @app.post('/api/scan', status_code=202)
 def scan_now(background_tasks: BackgroundTasks):
-    if collectors.LOCK.locked() or (auth.setting('scan_lease_until') or '') > core.now():
+    if collectors.LOCK.locked() or (kv.get('scan_lease_until') or '') > clock.now():
         raise HTTPException(409, 'Coleta já em execução')
     background_tasks.add_task(collectors.run_all)
     return {'queued': True}
@@ -297,7 +306,7 @@ def scan_now(background_tasks: BackgroundTasks):
 
 @app.get('/api/export.csv')
 def export_csv():
-    rows = core.query_opportunities()
+    rows = repo.query_opportunities()
     fields = [
         'title',
         'agency',

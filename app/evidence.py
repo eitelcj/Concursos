@@ -7,7 +7,6 @@ import io
 import ipaddress
 import re
 import socket
-import unicodedata
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -15,7 +14,7 @@ import requests
 from bs4 import BeautifulSoup
 from pypdf import PdfReader
 
-from . import __version__, polite
+from . import __version__, polite, textnorm
 
 # Exact hosts or government / public-school namespaces. No partial substring matches.
 ORGANIZERS = frozenset(
@@ -142,10 +141,6 @@ def fetch_official(url, session=None, *, pace=None):
     raise ValueError('Muitos redirecionamentos')
 
 
-def fold(s):
-    return ''.join(c for c in unicodedata.normalize('NFKD', str(s or '')) if not unicodedata.combining(c)).lower()
-
-
 def extract(url, raw, mime):
     if raw.startswith(b'%PDF'):
         reader = PdfReader(io.BytesIO(raw), strict=False)
@@ -196,7 +191,7 @@ def notice_proof(url, *, session=None, position=''):
     # PDFs are preferred. Explicitly titled official edital HTML is acceptable only if text is substantive.
     resolved, raw, mime = fetch_official(url, session)
     text, kind = extract(resolved, raw, mime)
-    norm = fold(text)
+    norm = textnorm.fold(text)
     if len(norm) < 350:
         raise ValueError('Edital sem texto legível; revisão manual obrigatória')
     if not ('edital' in norm and ('concurso publico' in norm or 'processo seletivo publico' in norm)):
@@ -212,7 +207,7 @@ def notice_proof(url, *, session=None, position=''):
         raise ValueError('Edital sem cargo de TI identificável')
     # Position-specific gate. Reject when role absent, do not borrow salary of a different job.
     if position:
-        pos = fold(position)
+        pos = textnorm.fold(position)
         significant = [
             w
             for w in re.findall(r'[a-z]{4,}', pos)
@@ -233,7 +228,7 @@ def date_supported(text, iso, kind='registration_end'):
     if not iso:
         return True
     y, m, d = iso.split('-')
-    content = fold(text)
+    content = textnorm.fold(text)
     for match in re.finditer(
         r'(?<!\d)' + re.escape(d) + '[./-]' + re.escape(m) + '[./-]' + re.escape(y) + r'(?!\d)', content
     ):
@@ -257,14 +252,14 @@ def money_supported_near_role(text, salary, role):
         return False
     rolewords = [
         w
-        for w in re.findall('[a-z]{4,}', fold(role))
+        for w in re.findall('[a-z]{4,}', textnorm.fold(role))
         if w not in ('cargo', 'concurso', 'publico', 'especialidade', 'superior')
     ]
     if not rolewords:
         return False
     br = f'{salary:,.2f}'.replace(',', '_').replace('.', ',').replace('_', '.')
     variants = (br, br.replace('.', ''), f'{salary:.2f}')
-    for line in fold(text).splitlines():
+    for line in textnorm.fold(text).splitlines():
         for variant in variants:
             for m in re.finditer(re.escape(variant), line):
                 # Nearby role, not any other role elsewhere in a long sentence.
@@ -286,8 +281,10 @@ def money_supported_near_role(text, salary, role):
 def location_supported(text, city, kind):
     if not city:
         return True
-    norm = fold(text)
-    tokens = [t for t in re.findall(r'[a-z]{4,}', fold(city)) if t not in ('regiao', 'estado', 'brasil', 'cidade')]
+    norm = textnorm.fold(text)
+    tokens = [
+        t for t in re.findall(r'[a-z]{4,}', textnorm.fold(city)) if t not in ('regiao', 'estado', 'brasil', 'cidade')
+    ]
     if not tokens:
         return False
     flags = (

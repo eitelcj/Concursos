@@ -2,7 +2,8 @@ from io import BytesIO
 
 from reportlab.pdfgen import canvas
 
-from app import collectors, core, evidence
+from app import collectors, evidence
+from app import repository as repo
 
 
 def official_pdf_text(text):
@@ -41,7 +42,7 @@ def test_extract_real_pdf_and_verify_role():
 
 def test_new_retification_revokes_previous_proof():
     url = 'https://conhecimento.fgv.br/concursos/test26'
-    eid, _ = core.upsert(
+    eid, _ = repo.upsert(
         {
             'title': 'Concurso TI',
             'agency': 'Orgao',
@@ -53,15 +54,15 @@ def test_new_retification_revokes_previous_proof():
             'reviewed': 1,
         }
     )
-    core.record_proof(
+    repo.record_proof(
         eid, evidence.Proof('https://conhecimento.fgv.br/edital.pdf', 'a' * 64, '', 'pdf', 'analista'), {}
     )
-    assert core.fetch_one(eid)['document_verified']
+    assert repo.fetch_one(eid)['document_verified']
     assert collectors.monitor_changes(url, [('Retificacao 01', url + '/ret1.pdf')]) == 0
-    assert core.fetch_one(eid)['document_verified']
+    assert repo.fetch_one(eid)['document_verified']
     assert (
         collectors.monitor_changes(url, [('Retificacao 01', url + '/ret1.pdf'), ('Retificacao 02', url + '/ret2.pdf')])
         == 1
     )
-    assert not core.fetch_one(eid)['document_verified']
-    assert any('retificação' in x['text'] for x in core.get_alerts())
+    assert not repo.fetch_one(eid)['document_verified']
+    assert any('retificação' in x['text'] for x in repo.get_alerts())
