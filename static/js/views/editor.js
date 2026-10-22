@@ -1,5 +1,5 @@
-import { api } from '../api.js';
-import { $, toast } from '../dom.js';
+import { api, post } from '../api.js';
+import { $, esc, toast } from '../dom.js';
 
 const TEXT = [
   ['title', 'Nome do concurso', 'wide', 'text', true],
@@ -33,6 +33,10 @@ function build(dialog) {
       ${TEXT.map(([name, label, cls, type, required]) => `<label class="field ${cls}">${label}
         <input class="input" name="${name}" type="${type}" ${type === 'number' ? 'step="0.01" min="0"' : ''} ${required ? 'required' : ''}></label>`).join('')}
       <div class="wide checks">${CHECKS.map(([name, label]) => `<label class="check"><input type="checkbox" name="${name}"> ${label}</label>`).join('')}</div>
+      <div class="wide suggest-row" id="suggestRow">
+        <button class="btn btn-ghost" type="button" id="suggestBtn">Sugerir campos a partir do edital</button>
+        <div class="suggest-box hidden" id="suggestBox" role="status" aria-live="polite"></div>
+      </div>
       <label class="field wide">Observações<textarea class="textarea" name="notes" rows="3"></textarea></label>
       <p class="wide muted">Salvar não confirma nada: use “Validar edital” para conferir os dados no documento oficial.</p>
       <p class="wide form-error" id="editError" role="alert"></p>
@@ -43,6 +47,7 @@ function build(dialog) {
     if (event.target.closest('[data-close]') || event.target === dialog) dialog.close();
   });
   $('#editForm', dialog).addEventListener('submit', save);
+  $('#suggestBtn', dialog).addEventListener('click', suggest);
 }
 
 export function openEditor(item, onSaved) {
@@ -54,6 +59,9 @@ export function openEditor(item, onSaved) {
   form.reset();
   $('#editorTitle', dialog).textContent = item ? 'Editar concurso' : 'Adicionar concurso';
   $('#editError', dialog).textContent = '';
+  $('#suggestRow', dialog).classList.toggle('hidden', !item);
+  $('#suggestBox', dialog).classList.add('hidden');
+  $('#suggestBox', dialog).innerHTML = '';
   if (item) {
     for (const [name] of TEXT) form.elements[name].value = item[name] ?? '';
     for (const [name] of CHECKS) form.elements[name].checked = Boolean(item[name]);
@@ -83,5 +91,41 @@ async function save(event) {
     await done();
   } catch (error) {
     $('#editError').textContent = error.message;
+  }
+}
+
+const labelOf = (name) => TEXT.find(([field]) => field === name)?.[1] ?? name;
+
+/** Ask the server to read the official notice. Fills only empty fields and never saves. */
+async function suggest() {
+  const dialog = $('#editor');
+  const form = $('#editForm', dialog);
+  const box = $('#suggestBox', dialog);
+  const button = $('#suggestBtn', dialog);
+  button.disabled = true;
+  button.textContent = 'Lendo o edital…';
+  try {
+    const result = await post(`/api/opportunities/${current.id}/suggest`);
+    const entries = Object.entries(result.suggestions);
+    if (!entries.length) {
+      box.innerHTML = '<p class="muted">Nenhuma sugestão segura encontrada no texto do edital.</p>';
+    } else {
+      const rows = entries.map(([name, { value, snippet }]) => {
+        const field = form.elements[name];
+        const filled = field && field.value.trim() !== '';
+        if (field && !filled) field.value = value;
+        return `<li><strong>${esc(labelOf(name))}:</strong> ${esc(value)}
+          ${filled ? '<em class="muted">(já preenchido, mantido)</em>' : '<em class="muted">(preenchido, confira)</em>'}
+          <span class="meta">“${esc(snippet)}”</span></li>`;
+      });
+      box.innerHTML = `<p class="muted">${esc(result.note)}</p><ul>${rows.join('')}</ul>`;
+    }
+    box.classList.remove('hidden');
+  } catch (error) {
+    box.innerHTML = `<p class="form-error">${esc(error.message)}</p>`;
+    box.classList.remove('hidden');
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Sugerir campos a partir do edital';
   }
 }
