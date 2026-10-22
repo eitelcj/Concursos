@@ -82,7 +82,11 @@ async function login(event) {
   const form = event.currentTarget;
   $('#loginError').textContent = '';
   try {
-    const result = await post('/api/auth/login', { password: form.elements.password.value, code: form.elements.code.value });
+    const result = await post('/api/auth/login', {
+      password: form.elements.password.value,
+      code: form.elements.code.value,
+      remember: form.elements.remember.checked,
+    });
     if (result.mfa_required) {
       $('#otpField').classList.remove('hidden');
       form.elements.code.required = true;

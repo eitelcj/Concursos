@@ -1,5 +1,6 @@
-import { post } from '../api.js';
-import { $, toast } from '../dom.js';
+import { api, post } from '../api.js';
+import { $, esc, toast } from '../dom.js';
+import { dateTime } from '../format.js';
 import { icon } from '../icons.js';
 import { state } from '../state.js';
 import * as theme from '../theme.js';
@@ -18,6 +19,28 @@ export function mount(container) {
           <button type="button" data-theme-choice="dark">${icon('moon')}Escuro</button>
           <button type="button" data-theme-choice="auto">${icon('monitor')}Automático</button>
         </div>
+      </section>
+      <section class="panel admin-only" id="passwordPanel">
+        <h3>Senha do administrador</h3>
+        <p class="muted">Mínimo de 12 caracteres. Ao trocar, os outros dispositivos são desconectados.</p>
+        <form id="passwordForm" class="form-grid">
+          <label class="field">Senha atual<input class="input" type="password" id="pwCurrent" autocomplete="current-password" required></label>
+          <label class="field">Nova senha<input class="input" type="password" id="pwNew" autocomplete="new-password" minlength="12" required></label>
+          <label class="field hidden" id="pwCodeField">Código do autenticador<input class="input" id="pwCode" autocomplete="one-time-code"></label>
+          <div class="form-actions"><button class="btn btn-primary" type="submit">Trocar senha</button></div>
+        </form>
+      </section>
+      <section class="panel admin-only" id="devicesPanel">
+        <h3>Dispositivos conectados</h3>
+        <p class="muted">Sessões abertas neste radar. Encerre as que você não reconhece.</p>
+        <div id="deviceList" class="device-list"></div>
+        <div class="form-actions">
+          <button class="btn btn-ghost" type="button" id="revokeOthers">Encerrar as outras sessões</button>
+          <button class="btn btn-ghost" type="button" id="revokeTrusted">Esquecer dispositivos confiáveis</button>
+        </div>
+        <p class="muted" id="trustedInfo"></p>
+        <h4>Atividade recente</h4>
+        <ul id="eventList" class="event-list"></ul>
       </section>
       <section class="panel admin-only" id="mfaPanel">
         <h3>Verificação em duas etapas (MFA)</h3>
@@ -55,6 +78,10 @@ export function mount(container) {
     const button = event.target.closest('[data-theme-choice]');
     if (button) theme.setPreference(button.dataset.themeChoice);
   });
+  $('#passwordForm', root).addEventListener('submit', changePassword);
+  $('#deviceList', root).addEventListener('click', onDeviceClick);
+  $('#revokeOthers', root).addEventListener('click', revokeOthers);
+  $('#revokeTrusted', root).addEventListener('click', revokeTrusted);
   $('#mfaSetupForm', root).addEventListener('submit', setup);
   $('#mfaConfirmForm', root).addEventListener('submit', confirm);
   $('#mfaDisableForm', root).addEventListener('submit', disable);
@@ -67,6 +94,105 @@ export function render() {
     : 'MFA desligado. Recomendado se o radar estiver acessível pela internet.';
   $('#mfaSetupForm', root).classList.toggle('hidden', state.mfa);
   $('#mfaDisableForm', root).classList.toggle('hidden', !state.mfa);
+  $('#pwCodeField', root).classList.toggle('hidden', !state.mfa);
+  if (state.admin) loadSecurity();
+}
+
+const EVENT_LABELS = {
+  login_ok: 'Login realizado',
+  login_failed: 'Tentativa de login recusada',
+  ip_blocked: 'IP bloqueado por excesso de tentativas',
+  session_revoked: 'Sessão encerrada',
+  other_sessions_revoked: 'Outras sessões encerradas',
+  trusted_devices_revoked: 'Dispositivos confiáveis removidos',
+  password_changed: 'Senha alterada',
+  password_reset_env: 'Senha redefinida pelo .env',
+  mfa_enabled: 'MFA ativado',
+  mfa_disabled: 'MFA desativado',
+  mfa_recovery_used: 'Código de recuperação usado',
+};
+
+/** A short, human label for a user-agent string. */
+function describeDevice(agent = '') {
+  const browser = /Edg\//.test(agent) ? 'Edge' : /Firefox\//.test(agent) ? 'Firefox' : /Chrome\//.test(agent) ? 'Chrome' : /Safari\//.test(agent) ? 'Safari' : 'Navegador';
+  const system = /Android/.test(agent) ? 'Android' : /iPhone|iPad/.test(agent) ? 'iOS' : /Windows/.test(agent) ? 'Windows' : /Mac OS/.test(agent) ? 'macOS' : /Linux/.test(agent) ? 'Linux' : 'dispositivo';
+  return `${browser} em ${system}`;
+}
+
+async function loadSecurity() {
+  try {
+    const data = await api('/api/auth/sessions');
+    $('#deviceList', root).innerHTML = data.sessions
+      .map(
+        (item) => `
+        <div class="row">
+          <div class="row-head">
+            <strong>${esc(describeDevice(item.user_agent))}</strong>
+            ${item.current ? '<span class="badge badge-ok">Este dispositivo</span>' : `<button class="btn btn-sm btn-danger" type="button" data-revoke="${esc(item.id)}">Encerrar</button>`}
+          </div>
+          <span class="meta">IP ${esc(item.ip || '—')} · ativo ${esc(dateTime(item.last_seen_at))} · expira ${esc(dateTime(item.expires_at))}</span>
+        </div>`,
+      )
+      .join('');
+    $('#trustedInfo', root).textContent = data.trusted_devices
+      ? `${data.trusted_devices} dispositivo(s) confiável(is) dispensam o código MFA.`
+      : 'Nenhum dispositivo confiável.';
+    $('#revokeTrusted', root).disabled = !data.trusted_devices;
+    $('#eventList', root).innerHTML = data.events
+      .slice(0, 12)
+      .map((item) => `<li><span>${esc(EVENT_LABELS[item.type] || item.type)}</span><time>${esc(dateTime(item.at))} · ${esc(item.ip || '')}</time></li>`)
+      .join('');
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function onDeviceClick(event) {
+  const button = event.target.closest('[data-revoke]');
+  if (!button) return;
+  try {
+    await post('/api/auth/sessions/revoke', { id: button.dataset.revoke });
+    toast('Sessão encerrada.');
+    loadSecurity();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function revokeOthers() {
+  try {
+    const result = await post('/api/auth/sessions/revoke-others');
+    toast(`${result.revoked} sessão(ões) encerrada(s).`);
+    loadSecurity();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function revokeTrusted() {
+  try {
+    await post('/api/auth/trusted-devices/revoke');
+    toast('Dispositivos confiáveis removidos.');
+    loadSecurity();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function changePassword(event) {
+  event.preventDefault();
+  try {
+    await post('/api/auth/password', {
+      current: $('#pwCurrent', root).value,
+      new: $('#pwNew', root).value,
+      code: $('#pwCode', root).value,
+    });
+    event.target.reset();
+    toast('Senha alterada. Outros dispositivos foram desconectados.');
+    loadSecurity();
+  } catch (error) {
+    toast(error.message);
+  }
 }
 
 async function setup(event) {
