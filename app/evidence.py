@@ -8,7 +8,7 @@ import ipaddress
 import re
 import socket
 from dataclasses import dataclass
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -78,6 +78,35 @@ def guard_public(host):
         ip = ipaddress.ip_address(a[4][0])
         if not ip.is_global:
             raise ValueError('Destino de rede não público')
+
+
+def unwrap_viewer(url):
+    """FCC links open PDFs through an accessibility viewer: .../rybena/web/index.html?file=<pdf>.
+
+    The viewer page is not the document, so use the PDF address it points to
+    (only when that address is itself an allowed official URL).
+    """
+    parts = urlparse(url)
+    if '/rybena/' in parts.path.lower():
+        for value in parse_qs(parts.query).get('file', []):
+            if official_url(value):
+                return value
+    return url
+
+
+def decode_html(raw):
+    """Decode page bytes: UTF-8 when valid, otherwise the declared charset (default Windows-1252)."""
+    try:
+        return raw.decode('utf-8')
+    except UnicodeDecodeError:
+        pass
+    found = re.search(rb'charset=["\']?([A-Za-z0-9_-]+)', raw[:4096], re.I)
+    for name in ([found.group(1).decode('ascii')] if found else []) + ['cp1252']:
+        try:
+            return raw.decode(name, errors='replace')
+        except LookupError:
+            continue
+    return raw.decode('utf-8', errors='replace')
 
 
 def fetch_official(url, session=None, *, pace=None):
@@ -225,14 +254,43 @@ def notice_proof(url, *, session=None, position=''):
     return Proof(resolved, hashlib.sha256(raw).hexdigest(), text, kind, excerpt[:350])
 
 
+MONTHS = (
+    'janeiro',
+    'fevereiro',
+    'marco',
+    'abril',
+    'maio',
+    'junho',
+    'julho',
+    'agosto',
+    'setembro',
+    'outubro',
+    'novembro',
+    'dezembro',
+)
+
+
+def date_matches(content, iso):
+    """Find a date written as 13/10/2026 or as '13 de outubro de 2026' (also '1º de março de 2026')."""
+    y, m, d = iso.split('-')
+    numeric = r'(?<!\d)' + re.escape(d) + '[./-]' + re.escape(m) + '[./-]' + re.escape(y) + r'(?!\d)'
+    words = (
+        r'(?<!\d)0?'
+        + str(int(d))
+        + r'\s*(?:o|º|°)?\s+de\s+'
+        + MONTHS[int(m) - 1]
+        + r'\s+(?:de\s+)?'
+        + re.escape(y)
+        + r'(?!\d)'
+    )
+    return list(re.finditer(numeric, content)) + list(re.finditer(words, content))
+
+
 def date_supported(text, iso, kind='registration_end'):
     if not iso:
         return True
-    y, m, d = iso.split('-')
     content = textnorm.fold(text)
-    for match in re.finditer(
-        r'(?<!\d)' + re.escape(d) + '[./-]' + re.escape(m) + '[./-]' + re.escape(y) + r'(?!\d)', content
-    ):
+    for match in date_matches(content, iso):
         around = content[max(0, match.start() - 500) : match.end() + 500]
         context = (
             ('inscri', 'periodo de inscricao', 'cronograma')

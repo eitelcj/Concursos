@@ -77,3 +77,40 @@ def test_deadline_only_proven():
     )
     collectors.deadline_alerts(reference=repo.date(2026, 10, 16))
     assert not any(x['kind'] == 'deadline' for x in repo.get_alerts())
+
+
+def test_fcc_viewer_link_becomes_the_pdf_address():
+    pdf = 'https://www.concursosfcc.com.br/concursos/trt8r126/trt8r126_edital_de_abertura.pdf'
+    html = f'<a href="/rybena/web/index.html?file={pdf}">Edital de Abertura</a>'
+    assert list(collectors.hrefs(html, 'https://www.concursosfcc.com.br/')) == [('Edital de Abertura', pdf)]
+    assert collectors.notice_anchor('Edital de Abertura', pdf)
+    foreign = '<a href="/rybena/web/index.html?file=https://evil.com/a.pdf">Edital</a>'
+    links = [u for _, u in collectors.hrefs(foreign, 'https://www.concursosfcc.com.br/')]
+    assert links == ['https://www.concursosfcc.com.br/rybena/web/index.html?file=https://evil.com/a.pdf']
+
+
+def test_viewer_wrapped_summons_stay_excluded():
+    pdf = 'https://www.concursosfcc.com.br/concursos/x/x_edital_n0_2_convocacao_prova_objetiva.pdf'
+    assert not collectors.notice_anchor('Edital', pdf)
+
+
+def test_latin1_page_titles_keep_accents():
+    raw = '<html><head><meta charset="iso-8859-1"></head>Polícia São Paulo</html>'.encode('latin-1')
+    assert 'São Paulo' in evidence.decode_html(raw)
+    assert 'São Paulo' in evidence.decode_html('São Paulo'.encode())
+
+
+def test_interrupted_runs_are_closed():
+    run = repo.scan_start('Fonte interrompida')
+    assert repo.close_interrupted_runs() >= 1
+    row = next(r for r in repo.source_health() if r['source'] == 'Fonte interrompida')
+    assert row['id'] == run and row['state'] == 'failed' and row['error'].startswith('Interrompida')
+
+
+def test_seeds_include_current_notices():
+    from app import seeds
+
+    seeds.seed_official()
+    titles = [i['title'] for i in repo.query_opportunities()]
+    assert any(t.startswith('TJPB 2026') for t in titles)
+    assert any(t.startswith('INB 2026') for t in titles)

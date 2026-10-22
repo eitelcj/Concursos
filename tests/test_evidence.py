@@ -121,3 +121,14 @@ def test_redirect_outside_official_blocked():
 
     with pytest.raises(ValueError, match='Redirecionamento'):
         evidence.fetch_official('https://www.gov.br/edital', S())
+
+
+def test_dates_written_in_words_are_recognized():
+    text = 'Período de inscrições: das 16h do dia 20 de outubro de 2026 até às 16h do dia 18 de novembro de 2026.'
+    assert evidence.date_supported(text, '2026-10-20', 'registration_start')
+    assert evidence.date_supported(text, '2026-11-18', 'registration_end')
+    assert not evidence.date_supported(text, '2026-11-19', 'registration_end')
+    assert evidence.date_supported('A prova será no dia 1º de março de 2027.', '2027-03-01', 'exam_date')
+    assert evidence.date_supported('Inscrições até 13/10/2026.', '2026-10-13')
+    # still needs the right context
+    assert not evidence.date_supported('Publicado em 20 de outubro de 2026.', '2026-10-20', 'registration_start')
