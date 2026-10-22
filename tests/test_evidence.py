@@ -132,3 +132,27 @@ def test_dates_written_in_words_are_recognized():
     assert evidence.date_supported('Inscrições até 13/10/2026.', '2026-10-13')
     # still needs the right context
     assert not evidence.date_supported('Publicado em 20 de outubro de 2026.', '2026-10-20', 'registration_start')
+
+
+TJPB_TABLE = """CARGO: ANALISTA JUDICIÁRIO – ESPECIALIDADE: TECNOLOGIA DA INFORMAÇÃO
+REMUNERAÇÃO: R$ 7.526,14 *
+ÁREA VAGAS AC PCD PN PI PQ
+TI – Desenvolvimento de Sistemas 10 6 1 3 0 0
+TI – Banco de Dados 1 1 0 0 0 0
+TI – Segurança da Informação 2 1 0 1 0 0
+CARGO: OFICIAL DE JUSTIÇA
+REMUNERAÇÃO: R$ 9.100,00
+Oficial de Justiça 10 6 1 3 0 0"""
+
+
+def test_salary_in_table_header_is_accepted():
+    assert evidence.money_supported_near_role(TJPB_TABLE, 7526.14, 'TI – Desenvolvimento de Sistemas')
+    assert evidence.money_supported_near_role(TJPB_TABLE, 7526.14, 'TI – Segurança da Informação')
+    # never borrow the amount of another header or a wrong value
+    assert not evidence.money_supported_near_role(TJPB_TABLE, 9100.00, 'TI – Desenvolvimento de Sistemas')
+    assert not evidence.money_supported_near_role(TJPB_TABLE, 7000.00, 'TI – Banco de Dados')
+
+
+def test_salary_without_label_is_not_borrowed_from_previous_row():
+    rows = 'Analista de Redes R$ 5.000,00\nAnalista de Sistemas 3 vagas'
+    assert not evidence.money_supported_near_role(rows, 5000.00, 'Analista de Sistemas')

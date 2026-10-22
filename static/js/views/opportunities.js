@@ -1,6 +1,6 @@
 import { patch, post } from '../api.js';
 import { $, esc, safeUrl, toast } from '../dom.js';
-import { STATUS_LABELS, dateTime, period, plural, salary } from '../format.js';
+import { STATUS_LABELS, dateTime, day, period, plural, salary, verifiedMessage } from '../format.js';
 import { icon } from '../icons.js';
 import { state } from '../state.js';
 import { isFavorite, toggleLocalFavorite } from '../favorites.js';
@@ -77,7 +77,14 @@ export function mount(container, onRefresh) {
           <option value="agency">Órgão (A–Z)</option>
           <option value="recent">Mais recentes</option>
         </select>
-        <label class="chip-check"><input type="checkbox" id="salary"> R$ 7 mil+ comprovado</label>
+        <div class="salary-filter" role="group" aria-labelledby="salaryTitle">
+          <div class="salary-filter-head"><span id="salaryTitle">Salário</span><output id="salaryText" for="salaryMin salaryMax">Qualquer valor</output></div>
+          <div class="dual-range">
+            <div class="dual-range-fill" id="salaryFill"></div>
+            <input type="range" id="salaryMin" min="${SALARY_MIN}" max="${SALARY_MAX}" step="1000" value="${SALARY_MIN}" aria-label="Salário mínimo">
+            <input type="range" id="salaryMax" min="${SALARY_MIN}" max="${SALARY_MAX}" step="1000" value="${SALARY_MAX}" aria-label="Salário máximo">
+          </div>
+        </div>
       </div>
       <div class="section-head">
         <p class="scan-line">${icon('clock')}<span id="latestScan">Nenhuma varredura ainda</span></p>
@@ -87,10 +94,21 @@ export function mount(container, onRefresh) {
     <div id="items" class="items" aria-busy="true">
       <div class="skeleton"></div><div class="skeleton"></div>
     </div>
-    <p class="muted">Somente fontes oficiais. Datas e salários sem prova documental aparecem como “a confirmar”.</p>`;
+    <p class="muted">Somente fontes oficiais. O sistema procura e confere o edital sozinho; o que ainda não foi conferido no edital aparece marcado como “não conferido”.</p>`;
 
-  for (const id of ['search', 'status', 'region', 'uf', 'sort', 'salary']) {
+  for (const id of ['search', 'status', 'region', 'uf', 'sort']) {
     $(`#${id}`, root).addEventListener(id === 'search' ? 'input' : 'change', render);
+  }
+  for (const id of ['salaryMin', 'salaryMax']) {
+    $(`#${id}`, root).addEventListener('input', (event) => {
+      const low = $('#salaryMin', root);
+      const high = $('#salaryMax', root);
+      if (Number(low.value) > Number(high.value)) {
+        if (event.target === low) high.value = low.value;
+        else low.value = high.value;
+      }
+      render();
+    });
   }
   $('#scanBtn', root).addEventListener('click', scan);
   $('#addBtn', root).addEventListener('click', () => openEditor(null, refresh));
@@ -98,15 +116,56 @@ export function mount(container, onRefresh) {
   $('#items', root).addEventListener('change', onStageChange);
 }
 
+const SALARY_MIN = 3000;
+const SALARY_MAX = 50000;
+
+const thousands = (value) => `R$ ${Number(value / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`;
+
+/** Slider band: null means no limit on that side (3 mil = no minimum, 50 mil+ = no maximum). */
+function salaryBand() {
+  const low = Number($('#salaryMin', root).value);
+  const high = Number($('#salaryMax', root).value);
+  return [low > SALARY_MIN ? low : null, high < SALARY_MAX ? high : null];
+}
+
+function paintSalary([low, high]) {
+  const text =
+    low == null && high == null
+      ? 'Qualquer valor'
+      : low == null
+        ? `até ${thousands(high)}`
+        : high == null
+          ? `${thousands(low)} ou mais`
+          : `${thousands(low)} a ${thousands(high)}`;
+  $('#salaryText', root).textContent = text;
+  const span = SALARY_MAX - SALARY_MIN;
+  const from = ((Number($('#salaryMin', root).value) - SALARY_MIN) / span) * 100;
+  const to = ((Number($('#salaryMax', root).value) - SALARY_MIN) / span) * 100;
+  const fill = $('#salaryFill', root);
+  fill.style.left = `${from}%`;
+  fill.style.width = `${to - from}%`;
+}
+
+function inSalaryBand(item, [low, high]) {
+  if (low == null && high == null) return true;
+  const values = [item.salary_min, item.salary_max].filter((v) => v != null);
+  if (!values.length) return false;
+  return Math.max(...values) >= (low ?? 0) && Math.min(...values) <= (high ?? Infinity);
+}
+
 function facts(item) {
-  const fact = (label, value, extra = '') =>
-    `<div><dt>${label}</dt><dd class="${value ? extra : 'pending'}">${esc(value || 'A confirmar')}</dd></div>`;
-  const verified = item.document_verified;
+  const fact = (label, value, checked, extra = '') => {
+    if (!value) return `<div><dt>${label}</dt><dd class="pending">A confirmar</dd></div>`;
+    const tag = checked ? '' : ' <span class="unchecked">não conferido</span>';
+    return `<div><dt>${label}</dt><dd class="${checked ? extra : 'is-unchecked'}">${esc(value)}${tag}</dd></div>`;
+  };
+  const verified = Boolean(item.document_verified);
+  const exam = [item.exam_date ? day(item.exam_date) : '', item.exam_cities].filter(Boolean).join(' · ');
   return `<dl class="facts">
-    ${fact('Salário do cargo', salary(item), item.salary_highlight ? 'highlight' : '')}
-    ${fact('Inscrições', verified ? period(item.registration_start, item.registration_end) : '')}
-    ${fact('Prova', verified ? item.exam_cities : '')}
-    ${fact('Lotação', verified ? item.work_cities : '')}
+    ${fact('Salário do cargo', salary(item, { any: true }), Boolean(item.salary_verified), item.salary_highlight ? 'highlight' : '')}
+    ${fact('Inscrições', period(item.registration_start, item.registration_end), verified)}
+    ${fact('Prova', exam, verified)}
+    ${fact('Lotação', item.work_cities, verified)}
   </dl>`;
 }
 
@@ -125,9 +184,12 @@ function card(item) {
       `<a class="btn btn-primary btn-sm" href="${safeUrl(item.apply_url)}" target="_blank" rel="noopener noreferrer">Inscrever-se ${icon('external')}</a>`,
   ].filter(Boolean).join('');
   const excerpt = (item.proof?.role_excerpt || '').slice(0, 280);
+  const check = item.last_check;
   const audit = item.proof
     ? `Edital ${esc(item.proof.sha256.slice(0, 16))}… verificado em ${esc(dateTime(item.proof.checked_at))}`
-    : 'Edital ainda não verificado';
+    : check && !check.ok
+      ? `Última tentativa de validação (${esc(dateTime(check.at))}): ${esc(check.message)}`
+      : 'Edital ainda não verificado; o sistema tenta validar sozinho a cada coleta';
   return `<article class="opp" data-status="${esc(item.status)}" data-id="${item.id}">
     <div class="opp-head">
       <div>
@@ -171,13 +233,14 @@ export function render() {
   const region = $('#region', root).value;
   const uf = $('#uf', root).value;
   const sort = $('#sort', root).value;
-  const rich = $('#salary', root).checked;
+  const band = salaryBand();
+  paintSalary(band);
   const list = visible
     .filter((i) =>
       (status === 'all' || (status === 'favorite' ? isFavorite(i) : i.status === status)) &&
       (region === 'all' || (region === 'sp' ? i.eligible_sp : i.national)) &&
       (uf === 'all' || i.state === uf || i.national || (uf === 'SP' && i.eligible_sp)) &&
-      (!rich || i.salary_highlight) &&
+      inSalaryBand(i, band) &&
       (!query || fold([i.title, i.agency, i.position, i.work_cities, i.exam_cities].join(' ')).includes(query)),
     )
     .sort((a, b) => Number(isFavorite(b)) - Number(isFavorite(a)) || (SORTS[sort] || SORTS.deadline)(a, b));
@@ -220,9 +283,8 @@ async function onAction(event) {
         openEditor(item, refresh);
         return;
       case 'verify':
-        toast('Conferindo documento, cargo, salário e datas…');
-        await post(`/api/opportunities/${id}/verify`);
-        toast('Edital verificado e registrado.');
+        toast('Procurando o edital oficial e conferindo cargo, datas e salário…');
+        toast(verifiedMessage(await post(`/api/opportunities/${id}/verify`)));
         break;
       default:
         return;

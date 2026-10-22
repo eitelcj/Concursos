@@ -26,7 +26,7 @@ from . import (
     polite,
     seeds,
     suggest,
-    textnorm,
+    verification,
 )
 from . import repository as repo
 from . import (
@@ -367,21 +367,13 @@ async def edit_opportunity(oid: int, request: Request):
 
 @app.post('/api/opportunities/{oid}/verify')
 def verify(oid: int):
-    item = repo.fetch_one(oid)
-    if not item:
-        raise HTTPException(404)
-    url = item.get('notice_url') or ''
-    if not evidence.official_url(url):
-        raise HTTPException(422, 'Informe link direto do edital oficial primeiro')
-    if not item.get('position') or not textnorm.is_it(item['position']):
-        raise HTTPException(422, 'Informe o cargo de TI específico')
     try:
-        proof = evidence.notice_proof(url, position=item['position'])
-        evidence.check_assertions(proof, item)
-        repo.record_proof(oid, proof, item)
+        item, warnings = verification.verify(oid)
+    except LookupError as e:
+        raise HTTPException(404) from e
     except Exception as e:
         raise HTTPException(422, 'Conferência documental reprovada: ' + str(e)) from e
-    return repo.fetch_one(oid)
+    return {**item, 'warnings': warnings}
 
 
 @app.post('/api/opportunities/{oid}/suggest')

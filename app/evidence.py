@@ -28,6 +28,7 @@ ORGANIZERS = frozenset(
         'portal.conhecimento.fgv.br',
         'www.cebraspe.org.br',
         'cebraspe.org.br',
+        'cdn.cebraspe.org.br',
         'www.ibam-concursos.org.br',
         'ibam-concursos.org.br',
         'abcp.selecao.net.br',
@@ -213,13 +214,30 @@ IT_KEYWORDS = (
     'seguranca da informacao',
     'computacao',
     'engenheiro de dados',
+    'engenharia de dados',
     'sistemas de informacao',
+    'cientista de dados',
+    'analise de dados',
+    'inteligencia artificial',
+    'governanca de ti',
+    'seguranca cibernetica',
+    'ciberseguranca',
+    'engenharia de software',
+    'analista de tecnologia',
+    'tecnico de ti',
+    'infraestrutura de tecnologia',
+    'devops',
 )
 
 
 def notice_proof(url, *, session=None, position=''):
     # PDFs are preferred. Explicitly titled official edital HTML is acceptable only if text is substantive.
     resolved, raw, mime = fetch_official(url, session)
+    return prove_document(resolved, raw, mime, position)
+
+
+def prove_document(resolved, raw, mime, position=''):
+    """Check already downloaded bytes: opening edital of a public contest with the IT role."""
     text, kind = extract(resolved, raw, mime)
     norm = textnorm.fold(text)
     if len(norm) < 350:
@@ -334,6 +352,31 @@ def money_supported_near_role(text, salary, role):
                 if re.search(r'\bcargo\s+[a-z]{4,}', intervening):
                     continue
                 return True
+    return money_supported_by_table_header(text, salary, rolewords)
+
+
+def money_supported_by_table_header(text, salary, rolewords):
+    """Accept a 'REMUNERAÇÃO: R$ x' header that precedes a table listing the role.
+
+    The salary must be the closest amount before the role and carry a salary label,
+    so a value from another role's row is never borrowed.
+    """
+    content = textnorm.fold(text)
+    br = f'{salary:,.2f}'.replace(',', '_').replace('.', ',').replace('_', '.')
+    amounts = list(re.finditer(r'r\$\s*([\d.]+,\d{2})', content))
+    if not amounts:
+        return False
+    for m in re.finditer(re.escape(rolewords[0]), content):
+        window = content[m.start() : m.start() + 120]
+        if sum(w in window for w in rolewords[:5]) < min(2, len(rolewords)):
+            continue
+        before = [a for a in amounts if a.end() <= m.start() and m.start() - a.end() <= 1200]
+        if not before:
+            continue
+        nearest = before[-1]
+        label = content[max(0, nearest.start() - 60) : nearest.start()]
+        if nearest.group(1) == br and re.search(r'remuneracao|vencimento|salario|subsidio', label):
+            return True
     return False
 
 
@@ -355,19 +398,36 @@ def location_supported(text, city, kind):
         window = norm[max(0, m.start() - 250) : m.end() + 250]
         if any(f in window for f in flags):
             return True
+    # "provas nas 27 capitais" / "em todas as capitais" includes the capital São Paulo.
+    if kind == 'exam' and tokens == ['paulo']:
+        for m in re.finditer(r'(?:27|vinte e sete|todas as)\s+capitais', norm):
+            window = norm[max(0, m.start() - 250) : m.end() + 250]
+            if 'prova' in window:
+                return True
     return False
 
 
-def check_assertions(proof, data):
+def assertion_failures(proof, data):
+    """Every claimed fact that the edital does not support, as (field, message) pairs."""
+    failures = []
     for k in ('registration_start', 'registration_end', 'exam_date'):
         if data.get(k) and not date_supported(proof.text, data[k], k):
-            raise ValueError(f'{k}: data não localizada no documento. Anexe retificação oficial ou deixe em branco.')
+            failures.append(
+                (k, f'{k}: data não localizada no documento. Anexe retificação oficial ou deixe em branco.')
+            )
     if data.get('exam_in_sp') and not location_supported(proof.text, 'São Paulo', 'exam'):
-        raise ValueError('Prova em SP ainda não demonstrada no edital')
+        failures.append(('exam_in_sp', 'Prova em SP ainda não demonstrada no edital'))
     if data.get('work_in_sp') and not location_supported(proof.text, 'São Paulo', 'work'):
-        raise ValueError('Trabalho em SP ainda não demonstrado no edital')
+        failures.append(('work_in_sp', 'Trabalho em SP ainda não demonstrado no edital'))
     for k in ('salary_min', 'salary_max'):
         if data.get(k) is not None and not money_supported_near_role(
             proof.text, float(data[k]), data.get('position', '')
         ):
-            raise ValueError(f'{k}: remuneração não comprovada junto ao cargo de TI no edital')
+            failures.append((k, f'{k}: remuneração não comprovada junto ao cargo de TI no edital'))
+    return failures
+
+
+def check_assertions(proof, data):
+    failures = assertion_failures(proof, data)
+    if failures:
+        raise ValueError(failures[0][1])

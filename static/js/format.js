@@ -44,13 +44,21 @@ export function money(value) {
   return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 2 });
 }
 
-/** Verified salary only; ranges shown as 'R$ x a R$ y'. */
-export function salary(item) {
-  if (!item.salary_verified) return '';
+/** Salary as 'R$ x' or 'R$ x a R$ y'. Only verified values unless { any: true }. */
+export function salary(item, { any = false } = {}) {
+  if (!item.salary_verified && !any) return '';
   const low = item.salary_min ?? item.salary_max;
   const high = item.salary_max ?? item.salary_min;
   if (low == null) return '';
   return low === high ? money(low) : `${money(low)} a ${money(high)}`;
+}
+
+/** Toast text after a validation; lists facts the edital did not support. */
+export function verifiedMessage(item) {
+  const missing = item?.warnings || [];
+  return missing.length
+    ? `Edital validado. Não encontrados no edital (removidos e guardados nas observações): ${missing.join(', ')}.`
+    : 'Edital validado e registrado.';
 }
 
 export function period(start, end) {

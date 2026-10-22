@@ -4,7 +4,7 @@ import logging
 import time
 from datetime import datetime
 
-from . import clock, collectors, config, database, kv
+from . import clock, collectors, config, database, kv, verification
 from . import repository as repo
 
 logging.basicConfig(level=logging.INFO)
@@ -39,6 +39,11 @@ def main():
     database.init_db()
     repo.close_interrupted_runs()
     LOG.info('Worker started: official only, every 3h America/Sao_Paulo')
+    try:
+        validated, failed = verification.auto_verify()
+        LOG.info('Validação automática: %s validados, %s pendentes', validated, failed)
+    except Exception:
+        LOG.exception('Validação automática falhou')
     while True:
         state = 'failed'
         try:

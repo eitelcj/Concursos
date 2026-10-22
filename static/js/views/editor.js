@@ -1,5 +1,6 @@
 import { api, post } from '../api.js';
 import { $, esc, toast } from '../dom.js';
+import { verifiedMessage } from '../format.js';
 
 const TEXT = [
   ['title', 'Nome do concurso', 'wide', 'text', true],
@@ -82,16 +83,31 @@ async function save(event) {
   for (const [name] of CHECKS) payload[name] = form.elements[name].checked ? 1 : 0;
   payload.notes = form.elements.notes.value.trim() || null;
   try {
-    await api(current ? `/api/opportunities/${current.id}` : '/api/opportunities', {
+    const saved = await api(current ? `/api/opportunities/${current.id}` : '/api/opportunities', {
       method: current ? 'PATCH' : 'POST',
       body: JSON.stringify(payload),
     });
     $('#editor').close();
-    toast('Salvo. Use “Validar edital” para confirmar os dados.');
     await done();
+    await validateAfterSave(saved);
   } catch (error) {
     $('#editError').textContent = error.message;
   }
+}
+
+/** Saving is enough: look for the official edital and validate right away. */
+async function validateAfterSave(saved) {
+  if (!saved?.id || !saved.position || !(saved.notice_url || saved.official_url || saved.apply_url)) {
+    toast('Salvo. Informe o cargo de TI e um link oficial para o sistema validar o edital.');
+    return;
+  }
+  toast('Salvo. Procurando o edital oficial e conferindo…');
+  try {
+    toast(verifiedMessage(await post(`/api/opportunities/${saved.id}/verify`)));
+  } catch (error) {
+    toast(`Salvo, mas o edital não foi validado: ${error.message}`);
+  }
+  await done();
 }
 
 const labelOf = (name) => TEXT.find(([field]) => field === name)?.[1] ?? name;
