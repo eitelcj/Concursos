@@ -26,7 +26,7 @@ SOURCES = sources.active(sources.load())
 def hrefs(html, base):
     soup = BeautifulSoup(html, 'html.parser')
     for a in soup.select('a[href]'):
-        url = urljoin(base, a.get('href', ''))
+        url = evidence.unwrap_viewer(urljoin(base, a.get('href', '')))
         if not evidence.official_url(url):
             continue
         text = ' '.join(a.stripped_strings).strip()[:300]
@@ -83,7 +83,7 @@ def scan_source(source, session=None):
     detected = registered = 0
     try:
         base, raw, _mime = evidence.fetch_official(source.url, session)
-        html = raw.decode('utf-8', errors='replace')
+        html = evidence.decode_html(raw)
         if not html.strip():
             raise ValueError('Fonte oficial vazia')
         if source.mode == 'watch':
@@ -131,7 +131,7 @@ def scan_source(source, session=None):
             for title, url in detail_links:
                 try:
                     _, htmlbytes, _ = evidence.fetch_official(url, session)
-                    seeds.append((title or url, url, htmlbytes.decode('utf-8', errors='replace')))
+                    seeds.append((title or url, url, evidence.decode_html(htmlbytes)))
                 except polite.DomainCoolingDown:
                     raise
                 except Exception as err:

@@ -30,9 +30,10 @@ def test_seed_preserved_but_pending():
     seeds.seed_official()
     seeds.seed_official()
     items = repo.query_opportunities()
-    assert len(items) == 4
+    assert len(items) == 6
     assert all(i['status'] == 'verify' and not i['document_verified'] for i in items)
-    assert all(i['eligible_sp'] for i in items)
+    assert all(i['eligible_sp'] for i in items if i['title'].startswith(('CGU', 'IFSP')))
+    assert not any(i['eligible_sp'] for i in items if i['title'].startswith(('TJPB', 'INB')))
 
 
 def test_legacy_unverified_never_open():

@@ -5,6 +5,7 @@ import time
 from datetime import datetime
 
 from . import clock, collectors, config, database, kv
+from . import repository as repo
 
 logging.basicConfig(level=logging.INFO)
 LOG = logging.getLogger('radar.worker')
@@ -36,6 +37,7 @@ def tick():
 
 def main():
     database.init_db()
+    repo.close_interrupted_runs()
     LOG.info('Worker started: official only, every 3h America/Sao_Paulo')
     while True:
         state = 'failed'

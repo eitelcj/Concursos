@@ -191,6 +191,17 @@ def scan_finish(run_id, found=0, added=0, error='', state=None):
         db.commit()
 
 
+def close_interrupted_runs():
+    """A restart can cut a collection in half; do not leave those sources showing 'running' forever."""
+    with database.DB_LOCK, database.connection() as db:
+        cur = db.execute(
+            "UPDATE scan_runs SET finished_at=?, state='failed', error=? WHERE state='running' AND finished_at IS NULL",
+            (clock.now(), 'Interrompida: o serviço foi reiniciado durante a coleta; será refeita na próxima rodada'),
+        )
+        db.commit()
+        return cur.rowcount
+
+
 def source_health():
     with database.connection() as db:
         rows = db.execute(
