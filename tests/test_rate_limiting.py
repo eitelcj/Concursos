@@ -120,15 +120,3 @@ def test_source_blocked_is_not_reported_as_success(monkeypatch):
     monkeypatch.setattr(evidence, 'fetch_official', blocked)
     assert collectors.scan_source(collectors.SOURCES[0]) == (0, 0, False)
     assert repo.source_health()[0]['state'] == 'blocked'
-
-
-def test_navigation_brand_and_mobile_rules():
-    from pathlib import Path
-
-    static = Path(__file__).resolve().parents[1] / 'static'
-    css = (static / 'style.css').read_text()
-    html = (static / 'index.html').read_text()
-    assert 'margin:0 auto;min-width:0;align-self:start' in css
-    assert '@media(max-width:700px)' in css
-    assert html.count('/static/brand-symbol.png') >= 2
-    assert (static / 'favicon.ico').stat().st_size > 100

@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
 from . import (
     __version__,
@@ -50,19 +50,20 @@ app = FastAPI(
 )
 app.add_middleware(GZipMiddleware, minimum_size=800)
 
-PUBLIC = {
-    '/healthz',
-    '/',
-    '/favicon.ico',
-    '/api/auth/login',
-    '/api/auth/status',
-    '/static/style.css',
-    '/static/app.js',
-    '/static/favicon.svg',
-    '/static/favicon.ico',
-    '/static/brand-symbol.png',
-    '/static/speedlora-logo.svg',
+PUBLIC = {'/healthz', '/', '/favicon.ico', '/api/auth/login', '/api/auth/status'}
+STATIC_DIR = (BASE / 'static').resolve()
+STATIC_TYPES = {
+    '.css': 'text/css; charset=utf-8',
+    '.js': 'text/javascript; charset=utf-8',
+    '.svg': 'image/svg+xml',
+    '.png': 'image/png',
+    '.ico': 'image/x-icon',
+    '.webmanifest': 'application/manifest+json',
 }
+
+
+def is_public(path):
+    return path in PUBLIC or path.startswith('/static/')
 
 
 @app.middleware('http')
@@ -76,10 +77,10 @@ async def gate(request: Request, call_next):
             return JSONResponse({'detail': 'Apenas application/json'}, status_code=415)
     session = auth.validate_session(request.cookies.get(auth.COOKIE))
     request.state.session = session
-    if path not in PUBLIC and not session:
+    if not is_public(path) and not session:
         return JSONResponse({'detail': 'Autenticação necessária'}, status_code=401)
     if (
-        path not in PUBLIC
+        not is_public(path)
         and request.method in ('POST', 'PUT', 'PATCH', 'DELETE')
         and not auth.csrf_valid(session, request.headers.get('X-CSRF-Token', ''))
     ):
@@ -88,7 +89,8 @@ async def gate(request: Request, call_next):
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['Referrer-Policy'] = 'no-referrer'
     response.headers['X-Frame-Options'] = 'DENY'
-    response.headers['Cache-Control'] = 'no-store'
+    # Static assets revalidate with ETag (always fresh after an update); everything else is never cached.
+    response.headers['Cache-Control'] = 'no-cache' if path.startswith('/static/') else 'no-store'
     response.headers['Content-Security-Policy'] = (
         "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
     )
@@ -102,7 +104,8 @@ def health():
 
 @app.get('/')
 def index():
-    return FileResponse(BASE / 'static/index.html')
+    html = (STATIC_DIR / 'index.html').read_text(encoding='utf-8').replace('__VERSION__', __version__)
+    return HTMLResponse(html)
 
 
 @app.get('/favicon.ico')
@@ -110,11 +113,13 @@ def classic_favicon():
     return FileResponse(BASE / 'static/favicon.ico')
 
 
-@app.get('/static/{filename}')
-def static(filename: str):
-    if filename not in ('app.js', 'style.css', 'favicon.svg', 'favicon.ico', 'brand-symbol.png', 'speedlora-logo.svg'):
+@app.get('/static/{file_path:path}')
+def static(file_path: str):
+    target = (STATIC_DIR / file_path).resolve()
+    media_type = STATIC_TYPES.get(target.suffix)
+    if not media_type or not target.is_file() or not target.is_relative_to(STATIC_DIR) or target.name.startswith('.'):
         raise HTTPException(404)
-    return FileResponse(BASE / 'static' / filename)
+    return FileResponse(target, media_type=media_type)
 
 
 @app.get('/api/auth/status')

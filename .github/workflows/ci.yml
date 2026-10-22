@@ -25,7 +25,7 @@ jobs:
       - name: Tests
         run: python -m pytest
       - name: JavaScript syntax
-        run: node --check static/app.js
+        run: for f in static/js/*.js static/js/views/*.js; do node --check "$f"; done
 
   docker:
     runs-on: ubuntu-latest
