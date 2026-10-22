@@ -2,6 +2,7 @@
 
 import csv
 import io
+import logging
 import re
 from contextlib import asynccontextmanager
 from html import escape as html_escape
@@ -23,6 +24,7 @@ from . import (
     kv,
     polite,
     seeds,
+    suggest,
     textnorm,
 )
 from . import repository as repo
@@ -54,6 +56,8 @@ app = FastAPI(
 app.add_middleware(GZipMiddleware, minimum_size=800)
 
 # Always reachable without a session.
+LOG = logging.getLogger(__name__)
+
 AUTH_FREE = {'/healthz', '/', '/favicon.ico', '/robots.txt', '/api/auth/login', '/api/auth/status'}
 # Read-only endpoints opened to visitors when RADAR_PUBLIC=1. Everything else is admin-only (deny by default).
 PUBLIC_READ = (
@@ -373,6 +377,30 @@ def verify(oid: int):
     except Exception as e:
         raise HTTPException(422, 'Conferência documental reprovada: ' + str(e)) from e
     return repo.fetch_one(oid)
+
+
+@app.post('/api/opportunities/{oid}/suggest')
+def suggest_fields(oid: int):
+    """Read the official notice and propose values. Only suggestions: nothing is saved."""
+    item = repo.fetch_one(oid)
+    if not item:
+        raise HTTPException(404)
+    url = item.get('notice_url') or item.get('official_url') or ''
+    if not evidence.official_url(url):
+        raise HTTPException(422, 'Informe um link oficial (HTTPS) do edital primeiro')
+    try:
+        resolved, raw, mime = evidence.fetch_official(url)
+        text, _kind = evidence.extract(resolved, raw, mime)
+    except ValueError as e:  # our own checks: messages are written for people
+        raise HTTPException(422, 'Não foi possível ler o edital: ' + str(e)) from e
+    except Exception as e:  # network or parsing failures: keep details in the log only
+        LOG.warning('Leitura de edital falhou (%s): %s', url, e)
+        raise HTTPException(422, 'Não foi possível acessar o edital agora. Tente novamente mais tarde.') from e
+    found = suggest.suggest(text, item.get('position') or '')
+    return {
+        'suggestions': {field: {'value': value, 'snippet': snippet} for field, (value, snippet) in found.items()},
+        'note': 'Sugestões extraídas do texto do documento. Confira cada uma antes de salvar.',
+    }
 
 
 @app.get('/api/candidates')

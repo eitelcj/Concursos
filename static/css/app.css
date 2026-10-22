@@ -1132,3 +1132,27 @@ dialog::backdrop {
   border-color: var(--border-strong, var(--border));
   background: var(--surface);
 }
+
+.suggest-row {
+  display: grid;
+  gap: 10px;
+}
+.suggest-box {
+  padding: 12px 14px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font-size: 14px;
+}
+.suggest-box ul {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+.suggest-box .meta {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
