@@ -30,7 +30,7 @@ function navigate() {
     else link.removeAttribute('aria-current');
   }
   $('#pageTitle').textContent = route.label;
-  document.title = `${route.label} · SpeedLora Radar`;
+  document.title = `${route.label} · ${appName()}`;
 }
 
 function buildNav() {
@@ -38,6 +38,8 @@ function buildNav() {
     (r) => `<a class="nav-link" href="#${r.id}" data-route="${r.id}">${icon(r.icon)}<span>${esc(r.label)}</span></a>`,
   ).join('');
 }
+
+const appName = () => document.querySelector('meta[name=app-name]')?.content || 'SpeedLora Radar';
 
 /** Decide what to show: the app (admin or public visitor) or the login screen. */
 function render() {
@@ -48,7 +50,7 @@ function render() {
   $('#loginView').classList.toggle('hidden', !showLogin);
   $('#loginBack').classList.toggle('hidden', !state.publicMode);
   if (showLogin) {
-    document.title = 'Entrar · SpeedLora Radar';
+    document.title = `Entrar · ${appName()}`;
     $('#loginForm input[type=password]').focus();
   } else {
     if (wantsLogin) history.replaceState(null, '', '#concursos');

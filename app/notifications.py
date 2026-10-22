@@ -14,13 +14,13 @@ def dispatch():
     if not pending:
         return {'sent': 0, 'reason': 'no pending events'}
     lines = [f'• {a["text"]}' for a in pending]
-    body = 'SpeedLora Concurso Radar — alertas pendentes\n\n' + '\n\n'.join(lines)
+    body = f'{config.app_name()} — alertas pendentes\n\n' + '\n\n'.join(lines)
     sent_to = []
     mail = config.smtp()
     host, sender, to = mail['host'], mail['sender'], mail['to']
     if host and sender and to:
         msg = EmailMessage()
-        msg['Subject'] = f'[Concurso Radar] {len(pending)} aviso(s) de concurso'
+        msg['Subject'] = f'[{config.app_name()}] {len(pending)} aviso(s) de concurso'
         msg['From'] = sender
         msg['To'] = to
         msg.set_content(body)
@@ -35,7 +35,7 @@ def dispatch():
     tg = config.telegram()
     token, chat = tg['token'], tg['chat_id']
     if token and chat:
-        msg = '🔔 Concurso Radar\n\n' + '\n\n'.join(lines)
+        msg = f'🔔 {config.app_name()}\n\n' + '\n\n'.join(lines)
         # Telegram API text limit 4096; transmit chunks preserving boundaries.
         for i in range(0, len(msg), 3800):
             resp = requests.post(

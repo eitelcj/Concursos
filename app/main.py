@@ -4,6 +4,7 @@ import csv
 import io
 import re
 from contextlib import asynccontextmanager
+from html import escape as html_escape
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -137,7 +138,13 @@ def health():
 
 @app.get('/')
 def index():
-    html = (STATIC_DIR / 'index.html').read_text(encoding='utf-8').replace('__VERSION__', __version__)
+    name = html_escape(config.app_name(), quote=True)
+    html = (
+        (STATIC_DIR / 'index.html')
+        .read_text(encoding='utf-8')
+        .replace('__VERSION__', __version__)
+        .replace('__APP_NAME__', name)
+    )
     return HTMLResponse(html)
 
 
