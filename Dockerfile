@@ -1,8 +1,23 @@
-FROM python:3.12-slim
+# syntax=docker/dockerfile:1
+FROM python:3.12-slim AS base
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TZ=America/Sao_Paulo RADAR_DB=/data/radar.sqlite3
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt && useradd -r -u 10001 radar && mkdir -p /data && chown radar:radar /data
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Test image: `docker build --target test -t radar-tests . && docker run --rm radar-tests`
+FROM base AS test
+COPY requirements-dev.txt pyproject.toml ./
+RUN pip install --no-cache-dir -r requirements-dev.txt
+COPY app/ ./app/
+COPY static/ ./static/
+COPY scripts/ ./scripts/
+COPY tests/ ./tests/
+CMD ["sh", "-c", "ruff check . && ruff format --check . && python -m pytest"]
+
+# Production image (default target)
+FROM base AS runtime
+RUN useradd -r -u 10001 radar && mkdir -p /data && chown radar:radar /data
 COPY app/ ./app/
 COPY static/ ./static/
 USER radar
