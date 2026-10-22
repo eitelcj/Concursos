@@ -7,7 +7,10 @@ from app.worker import slot
 
 def test_catalog_has_only_official_sources():
     assert len(collectors.SOURCES) >= 8
-    assert all(evidence.official_url(s.url) for s in collectors.SOURCES)
+    assert all(
+        evidence.data_api_url(s.url) if s.mode == 'gazette_search' else evidence.official_url(s.url)
+        for s in collectors.SOURCES
+    )
     assert not any('google' in s.url or 'pciconcursos' in s.url for s in collectors.SOURCES)
 
 

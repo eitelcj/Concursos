@@ -65,7 +65,9 @@ As fontes oficiais ficam em **`sources.yaml`**. Cada entrada tem nome, URL ofici
 ## Como funciona
 
 - **Coleta a cada 3 horas**, em horário de Brasília, com fila por domínio.
-- **Respeita o site:** lê `robots.txt` antes de cada página; se o site recusar (403) ou pedir espera (429), o domínio fica pausado pelo tempo indicado.
+- **Respeita o site:** lê `robots.txt` antes de cada página; se o site recusar (403) ou pedir espera (429), o domínio fica pausado pelo tempo indicado. O radar não se disfarça de navegador para passar por bloqueios.
+- **Diários oficiais:** concursos de bancas que bloqueiam acesso automático (como a Vunesp) costumam sair no Diário Oficial do município. O radar busca esses diários pela API pública do [Querido Diário](https://queridodiario.ok.org.br/) e mostra o que achar como "a conferir".
+- **Validação automática:** o sistema procura o PDF do edital de abertura nas páginas oficiais do concurso e confere cargo, datas e salário sozinho.
 - **Validação documental:** o edital é baixado, tem o hash SHA-256 registrado, e o cargo de TI, as datas e o salário precisam aparecer juntos no texto.
 - **Extração assistida:** no editor, o botão *Sugerir campos a partir do edital* propõe datas e salário com o trecho de origem. Nada é salvo sem você confirmar.
 - **Busca e filtros:** busca sem acento, filtro por estado e ordenação por prazo, salário, órgão ou data.
@@ -127,7 +129,7 @@ docker compose up -d --build
 - **Public mode** (`RADAR_PUBLIC=1`): anyone can browse; only the admin can change anything.
 - **Private mode** (`RADAR_PUBLIC=0`): everything requires the admin login.
 - Sources live in `sources.yaml`; each can be disabled with `enabled: false`.
-- The collector reads `robots.txt`, respects 403/429 responses, and spaces out requests per domain.
+- The collector reads `robots.txt`, respects 403/429 responses, and spaces out requests per domain. It never disguises itself to get past a block; contests from blocking organisers are found in municipal official gazettes through the public [Querido Diário](https://queridodiario.ok.org.br/) API.
 - Optional MFA, device/session management, and email or Telegram alerts (use *Send test alert* in Settings).
 - Tests: `docker build --target test -t radar-tests . && docker run --rm radar-tests`.
 - Every `vX.Y.Z` tag also publishes a ready-made image to `ghcr.io/flemuh/radar-public-sector`.

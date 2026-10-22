@@ -19,6 +19,7 @@ export const ALERT_LABELS = {
 
 export const CANDIDATE_LABELS = {
   edital_ti: 'Edital de TI encontrado',
+  gazette_ti: 'Achado no Diário Oficial',
   needs_review: 'Precisa de revisão',
   fetch_failed: 'Falha ao baixar',
   pending: 'Pendente',

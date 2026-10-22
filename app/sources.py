@@ -12,7 +12,7 @@ import yaml
 
 from . import evidence
 
-MODES = ('catalog', 'notice_index', 'details', 'watch')
+MODES = ('catalog', 'notice_index', 'details', 'watch', 'gazette_search')
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -46,10 +46,13 @@ def parse(data):
         if name in seen:
             raise SourceError(f'{where}: nome repetido "{name}"')
         seen.add(name)
-        if not evidence.official_url(url):
-            raise SourceError(f'{name}: a URL precisa ser HTTPS de um domínio oficial')
         if mode not in MODES:
             raise SourceError(f'{name}: modo inválido "{mode}" (use {", ".join(MODES)})')
+        if mode == 'gazette_search':
+            if not evidence.data_api_url(url):
+                raise SourceError(f'{name}: gazette_search só aceita a API pública do Querido Diário')
+        elif not evidence.official_url(url):
+            raise SourceError(f'{name}: a URL precisa ser HTTPS de um domínio oficial')
         uf = str(item.get('uf', '')).strip().upper()
         if uf and len(uf) != 2:
             raise SourceError(f'{name}: "uf" precisa ter duas letras')

@@ -80,6 +80,10 @@ def notice_anchor(text, url):
 
 
 def scan_source(source, session=None):
+    if source.mode == 'gazette_search':
+        from . import gazettes
+
+        return gazettes.scan_source(source, session)
     sid = repo.scan_start(source.name)
     detected = registered = 0
     try:

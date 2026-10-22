@@ -45,6 +45,8 @@ EDU_HOSTS = (
     'ufabc.edu.br',
     'ufscar.edu.br',
 )
+# Public data APIs that are allowed to be queried but are never proof of an edital.
+DATA_APIS = frozenset({'api.queridodiario.org.br'})
 MAX_BYTES = 12_000_000
 UA = f'RadarPublicSector/{__version__} (+https://github.com/flemuh/radar-public-sector; official-notice verification, 8 scans/day)'
 
@@ -56,6 +58,14 @@ def official_host(host):
         or host.endswith(('.gov.br', '.jus.br', '.leg.br'))
         or any(host == ed or host.endswith('.' + ed) for ed in EDU_HOSTS)
     )
+
+
+def data_api_url(url):
+    try:
+        p = urlparse(str(url))
+        return p.scheme == 'https' and p.port in (None, 443) and (p.hostname or '').lower() in DATA_APIS
+    except (ValueError, TypeError):
+        return False
 
 
 def official_url(url):
@@ -110,20 +120,24 @@ def decode_html(raw):
     return raw.decode('utf-8', errors='replace')
 
 
-def fetch_official(url, session=None, *, pace=None):
+def fetch_official(url, session=None, *, pace=None, data_api=False):
     """Fetch a real official URL; refuse forbidden domains/redirects and obey 403/429.
 
     Injectable sessions default to unpaced for deterministic unit tests. Real
     worker and API traffic is paced and shares the persisted backoff table.
     """
-    if not official_url(url):
+
+    def allowed(target):
+        return official_url(target) or (data_api and data_api_url(target))
+
+    if not allowed(url):
         raise ValueError('Endereço fora dos domínios oficiais permitidos')
     if pace is None:
         pace = session is None
     client = session or requests.Session()
     current = url
     for _redirects in range(5):
-        if not official_url(current):
+        if not allowed(current):
             raise ValueError('Redirecionamento para destino não oficial')
         host = urlparse(current).hostname
         if session is None:
@@ -151,7 +165,7 @@ def fetch_official(url, session=None, *, pace=None):
             if response.status_code in (301, 302, 303, 307, 308):
                 target = requests.compat.urljoin(response.url, response.headers.get('location', ''))
                 response.close()
-                if not official_url(target):
+                if not allowed(target):
                     raise ValueError('Redirecionamento para destino não oficial')
                 current = target
                 continue
