@@ -21,6 +21,13 @@ function sourceState(source, log) {
 
 function sourceRow(source, health) {
   const log = health.find((h) => h.source === source.name);
+  if (source.enabled === false) {
+    return `<article class="row">
+      <div class="row-head"><strong>${esc(source.name)}</strong><span class="badge badge-closed">Desligada</span></div>
+      <p>Desligada em sources.yaml. Não é consultada até ser ligada de novo.</p>
+      <p class="meta">${esc([source.agency, source.uf].filter(Boolean).join(' · '))}</p>
+    </article>`;
+  }
   const [label, tone] = sourceState(source, log);
   const mode = source.mode === 'watch' ? 'Monitor de alterações da página' : 'Busca de editais';
   let detail = 'Ainda não consultada.';
@@ -34,7 +41,7 @@ function sourceRow(source, health) {
   return `<article class="row">
     <div class="row-head"><strong>${esc(source.name)}</strong><span class="badge badge-${tone}">${label}</span></div>
     <p>${detail}</p>
-    <p class="meta">${mode}${log ? ` · última consulta ${esc(dateTime(log.finished_at || log.started_at))}` : ''} · <a href="${safeUrl(source.url)}" target="_blank" rel="noopener noreferrer">Abrir fonte oficial ↗</a></p>
+    <p class="meta">${esc([source.agency, source.uf].filter(Boolean).join(' · '))}${source.agency || source.uf ? ' · ' : ''}${mode}${log ? ` · última consulta ${esc(dateTime(log.finished_at || log.started_at))}` : ''} · <a href="${safeUrl(source.url)}" target="_blank" rel="noopener noreferrer">Abrir fonte oficial ↗</a></p>
   </article>`;
 }
 
