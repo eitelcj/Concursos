@@ -3,6 +3,7 @@ export const state = {
   admin: false,
   publicMode: true,
   mfa: false,
+  defaultUf: '',
   items: [],
   alerts: [],
   sources: {},

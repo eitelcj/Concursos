@@ -8,6 +8,21 @@ import { openEditor } from './editor.js';
 
 let root;
 let refresh = async () => {};
+let defaultApplied = false;
+
+/** Lowercase and without accents, so “sao paulo” finds “São Paulo” and “fiscal” finds “Fiscal”. */
+const fold = (value) =>
+  String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase('pt-BR');
+
+const SORTS = {
+  deadline: (a, b) => (a.days_left ?? 9999) - (b.days_left ?? 9999) || b.id - a.id,
+  salary: (a, b) => (b.salary_max ?? b.salary_min ?? 0) - (a.salary_max ?? a.salary_min ?? 0),
+  agency: (a, b) => fold(a.agency).localeCompare(fold(b.agency), 'pt-BR'),
+  recent: (a, b) => b.id - a.id,
+};
 
 export function mount(container, onRefresh) {
   root = container;
@@ -44,6 +59,15 @@ export function mount(container, onRefresh) {
           <option value="sp">Prova ou trabalho em SP</option>
           <option value="national">Nacional</option>
         </select>
+        <label class="sr-only" for="uf">Estado</label>
+        <select class="select" id="uf"><option value="all">Todos os estados</option></select>
+        <label class="sr-only" for="sort">Ordenar por</label>
+        <select class="select" id="sort">
+          <option value="deadline">Prazo mais próximo</option>
+          <option value="salary">Maior salário</option>
+          <option value="agency">Órgão (A–Z)</option>
+          <option value="recent">Mais recentes</option>
+        </select>
         <label class="chip-check"><input type="checkbox" id="salary"> R$ 7 mil+ comprovado</label>
       </div>
       <div class="section-head">
@@ -56,7 +80,7 @@ export function mount(container, onRefresh) {
     </div>
     <p class="muted">Somente fontes oficiais. Datas e salários sem prova documental aparecem como “a confirmar”.</p>`;
 
-  for (const id of ['search', 'status', 'region', 'salary']) {
+  for (const id of ['search', 'status', 'region', 'uf', 'sort', 'salary']) {
     $(`#${id}`, root).addEventListener(id === 'search' ? 'input' : 'change', render);
   }
   $('#scanBtn', root).addEventListener('click', scan);
@@ -128,15 +152,22 @@ export function render() {
   $('#countDue', root).textContent = visible.filter((i) => i.status === 'open' && i.days_left != null && i.days_left <= 7).length;
   $('#countPending', root).textContent = visible.filter((i) => !i.document_verified).length;
 
-  const query = $('#search', root).value.trim().toLocaleLowerCase('pt-BR');
+  fillStates(visible);
+  const query = fold($('#search', root).value.trim());
   const status = $('#status', root).value;
   const region = $('#region', root).value;
+  const uf = $('#uf', root).value;
+  const sort = $('#sort', root).value;
   const rich = $('#salary', root).checked;
-  const list = visible.filter((i) =>
-    (status === 'all' || (status === 'favorite' ? isFavorite(i) : i.status === status)) &&
-    (region === 'all' || (region === 'sp' ? i.eligible_sp : i.national)) &&
-    (!rich || i.salary_highlight) &&
-    (!query || [i.title, i.agency, i.position, i.work_cities, i.exam_cities].join(' ').toLocaleLowerCase('pt-BR').includes(query)));
+  const list = visible
+    .filter((i) =>
+      (status === 'all' || (status === 'favorite' ? isFavorite(i) : i.status === status)) &&
+      (region === 'all' || (region === 'sp' ? i.eligible_sp : i.national)) &&
+      (uf === 'all' || i.state === uf || i.national || (uf === 'SP' && i.eligible_sp)) &&
+      (!rich || i.salary_highlight) &&
+      (!query || fold([i.title, i.agency, i.position, i.work_cities, i.exam_cities].join(' ')).includes(query)),
+    )
+    .sort((a, b) => Number(isFavorite(b)) - Number(isFavorite(a)) || (SORTS[sort] || SORTS.deadline)(a, b));
 
   const items = $('#items', root);
   items.setAttribute('aria-busy', 'false');
@@ -202,4 +233,19 @@ async function scan() {
   } finally {
     button.disabled = false;
   }
+}
+
+/** Fill the state list from the visible items and preselect the configured UF once. */
+function fillStates(visible) {
+  const select = $('#uf', root);
+  const current = select.value;
+  const ufs = [...new Set([...visible.map((i) => i.state).filter(Boolean), state.defaultUf].filter(Boolean))].sort();
+  select.innerHTML =
+    '<option value="all">Todos os estados</option>' + ufs.map((u) => `<option value="${esc(u)}">${esc(u)}</option>`).join('');
+  if (!defaultApplied && state.loaded) {
+    defaultApplied = true;
+    if (state.defaultUf && ufs.includes(state.defaultUf)) select.value = state.defaultUf;
+    return;
+  }
+  select.value = [...select.options].some((o) => o.value === current) ? current : 'all';
 }

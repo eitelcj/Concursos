@@ -24,7 +24,13 @@ def test_visitor_can_browse_but_not_change_anything(monkeypatch):
     hidden = _item(title='Oculto', notice_url='https://www.gov.br/x.pdf', dismissed=1)
     with TestClient(app) as cli:
         status = cli.get('/api/auth/status').json()
-        assert status == {'authenticated': False, 'public': True, 'mfa_enabled': None, 'csrf': None}
+        assert status == {
+            'authenticated': False,
+            'public': True,
+            'default_uf': '',
+            'mfa_enabled': None,
+            'csrf': None,
+        }
         items = cli.get('/api/opportunities').json()['items']
         mine = next(i for i in items if i['id'] == oid)
         assert 'notes' not in mine and 'favorite' not in mine and 'applied' not in mine

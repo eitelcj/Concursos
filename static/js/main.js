@@ -135,6 +135,7 @@ async function init() {
     state.admin = status.authenticated;
     state.publicMode = status.public;
     state.mfa = Boolean(status.mfa_enabled);
+    state.defaultUf = status.default_uf || '';
     setCsrf(status.csrf);
   } catch (error) {
     toast(error.message);

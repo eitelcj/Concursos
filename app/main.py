@@ -173,6 +173,7 @@ def status(request: Request):
     return {
         'authenticated': authenticated,
         'public': config.public_mode(),
+        'default_uf': config.default_uf(),
         'mfa_enabled': auth.mfa_enabled() if authenticated else None,
         'csrf': request.cookies.get('radar_csrf', '') if authenticated else None,
     }
