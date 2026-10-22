@@ -73,9 +73,10 @@ def notice_anchor(text, url):
         )
     ):
         return False
-    return ('edital' in q and any(w in q for w in ('abertura', '01/', '1/', 'nº 1', 'n. 1', 'edital'))) or (
-        'edital' in path and path.endswith('.pdf')
-    )
+    if 'edital' in q and any(w in q for w in ('abertura', '01/', '1/', 'nº 1', 'n. 1', 'edital')):
+        return True
+    # Cebraspe publishes PDFs with hashed names; the link text says "ED 1 ... ABERTURA".
+    return path.endswith('.pdf') and bool('edital' in path or re.search(r'\bed\.?\s*0?1\b', q) or 'abertura' in q)
 
 
 def scan_source(source, session=None):
@@ -386,6 +387,14 @@ def run_all(session=None):
                 'coverage',
                 f'{failed}/{len(SOURCES)} fontes oficiais falharam. Cobertura incompleta; veja Fontes.',
             )
+        if session is None:
+            # Real runs only: validate pending contests by finding their opening edital.
+            from .verification import auto_verify
+
+            try:
+                auto_verify()
+            except Exception:
+                LOG.exception('Validação automática falhou')
         deadline_alerts()
         try:
             from .notifications import dispatch

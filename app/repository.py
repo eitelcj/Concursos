@@ -1,9 +1,10 @@
 """Persistence of opportunities, proofs, scans, candidates and alerts."""
 
 import hashlib
+import json
 from datetime import date
 
-from . import clock, database, status_rules
+from . import clock, database, kv, status_rules
 from .textnorm import fold
 
 FIELDS = (
@@ -233,6 +234,10 @@ def attach_proof(item):
     item['proof'] = (
         {k: row[k] for k in ('notice_url', 'sha256', 'checked_at', 'role_excerpt', 'validated_dates')} if row else None
     )
+    try:
+        item['last_check'] = json.loads(kv.get(f'verify:{item["id"]}') or 'null')
+    except ValueError:
+        item['last_check'] = None
     return item
 
 

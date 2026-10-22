@@ -83,7 +83,8 @@ def test_verify_mocked_proof(monkeypatch):
         'pdf',
         'analista de sistemas',
     )
-    monkeypatch.setattr(evidence, 'notice_proof', lambda url, position='': proof)
+    monkeypatch.setattr(evidence, 'fetch_official', lambda url, session=None: (url, b'%PDF-1.4', 'application/pdf'))
+    monkeypatch.setattr(evidence, 'prove_document', lambda resolved, raw, mime, position='': proof)
     with TestClient(app) as cli:
         csrf = login(cli)
         h = {'X-CSRF-Token': csrf}
