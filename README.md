@@ -114,7 +114,7 @@ tests/        testes automatizados
 
 ## English summary
 
-**SpeedLora Radar** monitors Brazilian public-sector IT job notices from official sources. A notice is marked as confirmed only when the official document was downloaded, contains an IT role, and the dates and salary appear in the same text. Full version: [radar.speedlora.app](https://radar.speedlora.app).
+**SpeedLora Radar** monitors Brazilian public-sector IT job notices from official sources. A notice is marked as confirmed only when the official document was downloaded, contains an IT role, and the dates and salary appear in the same text.
 
 **Run it with Docker:**
 
