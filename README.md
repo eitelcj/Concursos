@@ -1,7 +1,5 @@
 # SpeedLora Radar
 
-> **Teste a versão completa em [radar.speedlora.app](https://radar.speedlora.app)**
-
 Monitor de concursos públicos de TI (repositório `radar-public-sector`) a partir de **editais e páginas oficiais**. Um concurso só aparece como confirmado quando o edital oficial foi baixado, contém um cargo de TI e as datas e o salário estão no mesmo documento.
 
 Você pode usar do seu jeito: uma **instância pública** só de leitura para qualquer pessoa, ou uma **instância privada** com login, senha e MFA só para você.
